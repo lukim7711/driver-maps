@@ -27,7 +27,7 @@ sequenceDiagram
         Cache-->>Server: Kembalikan koordinat tercache (jika ada)
         Server->>Maps: 5. Resolusi alamat ke koordinat (Geocoding & Places API)
         Server->>Maps: 6. Hitung matriks jarak/waktu (Routes API: computeRouteMatrix)
-        Note over Server: Pecahkan TSP (2-Phase Brute-Force: Pickup optimal → Delivery optimal)
+        Note over Server: Pecahkan TSP (Hybrid: Brute-force ≤3 order, Greedy+2-Opt >3 order)
     end
     
     Server->>Maps: 7. Request rute & polyline final (Routes API: computeRoutes)
@@ -67,14 +67,12 @@ sequenceDiagram
 
 ## **3. Fitur Lanjutan (Advanced Features)**
 
-### **3.1. 2-Phase Brute-Force TSP Solver (Pickup-All-First)**
-Berdasarkan riset lapangan, norma operasional driver adalah **mengambil semua pickup terlebih dahulu, baru mengantar semua delivery**. Oleh karena itu, TSP dipecah menjadi 2 fase terpisah yang masing-masing dicari dengan brute-force optimal:
+### **3.1. Hybrid TSP Solver with 2-Opt (Pickup-All-First)**
+Berdasarkan riset lapangan, norma operasional driver adalah **mengambil semua pickup terlebih dahulu, baru mengantar semua delivery**. Oleh karena itu, solver dirancang sebagai hybrid yang memastikan constraint pickup-before-delivery selalu terpenuhi:
 
-- **Fase 1 — Urutan Pickup Optimal**: Dari posisi driver, brute-force semua permutasi urutan pickup (N! permutasi).
-- **Fase 2 — Urutan Delivery Optimal**: Dari pickup terakhir, brute-force semua permutasi urutan delivery (N! permutasi).
-- **Kompleksitas**: 2×N! (bukan (2N)!). Untuk 6 order: 2×720 = **1.440 permutasi** (selesai dalam milidetik di Node.js) vs 12! = 479 juta kalau dicampur.
-- **Hasil**: Selalu menemukan urutan **global optimal** untuk norma pickup-all-first.
-- **Fallback**: Menggunakan matriks jarak Haversine (great-circle) dengan kecepatan estimasi 30 km/h. Tidak perlu panggil `computeRouteMatrix` saat solving, sehingga sangat cepat dan tidak terbatas quota API.
+- **≤3 order**: Brute-force semua permutasi yang valid (maks. 720 permutasi) — menemukan **global optimal**.
+- **>3 order**: **Greedy Nearest Neighbor** untuk solusi awal, dilanjutkan **2-opt local search** untuk menghilangkan *crossing edges* dan memperbaiki rute yang terlalu diputar. Kompleksitas O(N²) per iterasi, sangat cepat untuk 4–6 order.
+- **Matriks jarak**: Menggunakan **Haversine distance matrix** (great-circle) dengan estimasi kecepatan 30 km/h. Tidak perlu panggil `computeRouteMatrix` saat solving — sangat cepat, tidak terbatas quota API, dan tidak ada data hilang.
 
 ### **3.2. Throttling Geocoding (Anti-Quota Burn)**
 Proses geocoding dibatasi maksimal **3 order paralel per API type** menggunakan `asyncPool`. Pickup dan delivery dalam satu order tetap diproses paralel via `Promise.all`. Ini mencegah pembakaran quota Google Maps API yang terlalu cepat saat banyak order diupload bersamaan.
@@ -175,13 +173,13 @@ Mengunggah screenshot pesanan kurir secara massal dan mengembalikan koordinat se
 
 Selama pengembangan dan pengujian, beberapa penyesuaian arsitektur penting dilakukan untuk menjaga kestabilan, kinerja, dan pengalaman pengguna:
 
-### **6.1. 2-Phase Brute-Force TSP Solver**
-* **Masalah:** Solver TSP brute-force murni untuk semua titik (pickup+delivery campur) memiliki kompleksitas $(2N)!$. Untuk 6 order (12 titik + 1 driver = 13 titik), permutasi yang dihasilkan adalah $12! \approx 479$ juta — impossible di Node.js single-thread.
-* **Solusi:** Berdasarkan riset lapangan, norma driver adalah **pickup semua dulu, baru delivery**. TSP dipecah menjadi 2 fase:
-  - **Fase 1**: Brute-force urutan pickup optimal dari posisi driver (N! permutasi).
-  - **Fase 2**: Brute-force urutan delivery optimal dari pickup terakhir (N! permutasi).
-  - **Kompleksitas total**: $2 \times N!$. Untuk 6 order: $2 \times 720 = 1.440$ permutasi — selesai dalam **milidetik** di Node.js.
-  - **Hasil**: Selalu menemukan urutan **global optimal** untuk norma pickup-all-first, tanpa perlu heuristic.
+### **6.1. Hybrid TSP Solver with 2-Opt**
+* **Masalah:** Solver TSP brute-force untuk semua titik (pickup+delivery campur) memiliki kompleksitas $(2N)!$. Untuk 6 order (12 titik + 1 driver = 13 titik), permutasi yang dihasilkan adalah $12! \approx 479$ juta — impossible di Node.js single-thread.
+* **Solusi:** Implementasi **hybrid solver** yang mematuhi constraint pickup-before-delivery:
+  - **≤3 order**: Brute-force semua permutasi valid (maks. 720 permutasi) — menemukan **global optimal**.
+  - **>3 order**: **Greedy Nearest Neighbor** untuk solusi awal yang valid, dilanjutkan **2-opt local search** untuk menghilangkan *crossing edges* dan memperbaiki rute yang terlalu diputar.
+  - **2-opt**: Mencoba membalik segmen rute dan menerima kalau hasilnya lebih pendek DAN tetap valid (pickup sebelum delivery). Berulang sampai tidak ada improvement.
+  - **Matriks jarak**: Menggunakan Haversine distance matrix — tidak perlu API call saat solving, sehingga sangat cepat dan tidak terbatas quota.
 
 ### **6.2. Throttling Geocoding (Anti-Quota Burn)**
 * **Masalah:** Endpoint `/api/extract-address` menjalankan Geocoding API dan Places API secara paralel. Untuk 5 order, masing-masing API harus resolve 10 alamat (pickup+delivery), menghasilkan 20 API call sekaligus. Ini mudah memicu rate limit atau membakar quota Google Maps API.
