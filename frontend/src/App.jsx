@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
   Upload, 
   Navigation, 
@@ -43,32 +43,86 @@ export default function App() {
     total: 0
   });
 
-  const handleCompress = async (incomingFiles) => {
-    const originalTotal = files.reduce((s, f) => s + f.size, 0) + incomingFiles.reduce((s, f) => s + f.size, 0);
-    setCompressionStatus({
-      isCompressing: true,
-      originalSize: originalTotal,
-      compressedSize: 0,
-      completed: 0,
-      total: incomingFiles.length
-    });
+  // Ref to access latest files in async callbacks without stale closure
+  const filesRef = useRef(files);
 
-    try {
-      const results = await compressImages(incomingFiles, (completed, total) => {
-        setCompressionStatus(prev => ({ ...prev, completed, total }));
+  // Compression runs in useEffect to avoid React 18 automatic batching
+  // in event handlers (which would batch isCompressing=true and =false together,
+  // causing the user to never see the loading UI)
+  const [compressionTask, setCompressionTask] = useState(null);
+
+  useEffect(() => {
+    filesRef.current = files;
+  });
+
+  useEffect(() => {
+    if (!compressionTask) return;
+
+    const { files: incomingFiles } = compressionTask;
+
+    const runCompression = async () => {
+      const currentFiles = filesRef.current;
+      const originalTotal = currentFiles.reduce((s, f) => s + f.size, 0);
+
+      // Show loading UI (triggers separate re-render because we're in useEffect)
+      setCompressionStatus({
+        isCompressing: true,
+        originalSize: originalTotal,
+        compressedSize: 0,
+        completed: 0,
+        total: incomingFiles.length
       });
 
-      const compressedTotal = [...files, ...results.map(r => r.file)].reduce((s, f) => s + f.size, 0);
-      return { results, compressedTotal, originalTotal };
-    } catch (err) {
-      console.error('Compression batch error:', err);
-      const results = incomingFiles.map(f => ({ file: f, originalSize: f.size, compressedSize: f.size, skipped: true }));
-      const compressedTotal = [...files, ...incomingFiles].reduce((s, f) => s + f.size, 0);
-      return { results, compressedTotal, originalTotal };
-    }
-  };
+      try {
+        const results = await compressImages(incomingFiles, (completed, total) => {
+          setCompressionStatus(prev => ({ ...prev, completed, total }));
+        });
 
-  const handleFileChange = async (e) => {
+        // Replace raw files with compressed versions
+        setFiles(prev => {
+          const newFiles = [...prev];
+          incomingFiles.forEach((raw, idx) => {
+            const foundIdx = newFiles.findIndex(f => f.name === raw.name && f.size === raw.size);
+            if (foundIdx >= 0 && results[idx] && !results[idx].skipped) {
+              newFiles[foundIdx] = results[idx].file;
+            }
+          });
+          return newFiles;
+        });
+
+        // Calculate final compressed total
+        const compressedFilesSize = results.reduce((s, r) => s + r.file.size, 0);
+        const skippedFilesSize = results.filter(r => r.skipped).reduce((s, r) => s + r.originalSize, 0);
+        const currentFilesSize = currentFiles.reduce((s, f) => s + f.size, 0);
+        const incomingFilesSize = incomingFiles.reduce((s, f) => s + f.size, 0);
+        const compressedTotal = currentFilesSize - incomingFilesSize + compressedFilesSize + skippedFilesSize;
+
+        // Show savings badge
+        setCompressionStatus({
+          isCompressing: false,
+          originalSize: originalTotal,
+          compressedSize: compressedTotal,
+          completed: results.length,
+          total: incomingFiles.length
+        });
+      } catch (err) {
+        console.error('Compression error:', err);
+        const currentFilesSize = currentFiles.reduce((s, f) => s + f.size, 0);
+        setCompressionStatus({
+          isCompressing: false,
+          originalSize: currentFilesSize,
+          compressedSize: currentFilesSize,
+          completed: incomingFiles.length,
+          total: incomingFiles.length
+        });
+      }
+    };
+
+    runCompression();
+  }, [compressionTask]);
+
+  // File Upload Handlers
+  const handleFileChange = (e) => {
     if (e.target.files) {
       const selectedFiles = Array.from(e.target.files);
       const totalAllowed = 5 - files.length;
@@ -78,19 +132,13 @@ export default function App() {
       }
       const incomingFiles = selectedFiles.slice(0, totalAllowed);
 
-      const { results, compressedTotal, originalTotal } = await handleCompress(incomingFiles);
-      const compressedFiles = results.map(r => r.file);
-      const allFiles = [...files, ...compressedFiles];
-
-      setFiles(allFiles);
-      setCompressionStatus({
-        isCompressing: false,
-        originalSize: originalTotal,
-        compressedSize: compressedTotal,
-        completed: results.length,
-        total: incomingFiles.length
-      });
+      // Save raw files to state immediately (visible in UI right away)
+      setFiles(prev => [...prev, ...incomingFiles]);
+      e.target.value = '';
       setError(null);
+
+      // Trigger compression via useEffect (separate from event handler batching)
+      setCompressionTask({ files: incomingFiles, id: Date.now() });
     }
   };
 
