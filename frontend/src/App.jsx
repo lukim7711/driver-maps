@@ -55,7 +55,7 @@ export default function App() {
           setDriverLat(position.coords.latitude.toFixed(6));
           setDriverLng(position.coords.longitude.toFixed(6));
         },
-        (err) => {
+        () => {
           console.warn('Geolocation access denied/failed, using default coordinates (Jakarta Barat).');
         }
       );
@@ -120,7 +120,7 @@ export default function App() {
   // Convert duration string "Xs" or number to descriptive format
   const formatDuration = (durationVal) => {
     if (!durationVal) return null;
-    let seconds = 0;
+    let seconds;
     if (typeof durationVal === 'string') {
       seconds = parseInt(durationVal.replace('s', ''), 10);
     } else {

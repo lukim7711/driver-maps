@@ -2,6 +2,9 @@ const axios = require('axios');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
+const AXIOS_TIMEOUT = 15000;
+const AVG_SPEED_MPS = 8.33; // 30 km/h in m/s for Haversine fallback
+
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
 /**
@@ -23,8 +26,9 @@ async function geocodeAddress(address) {
             params: {
                 address: address,
                 key: apiKey,
-                region: 'id', // Bias results to Indonesia
-            }
+                region: 'id',
+            },
+            timeout: AXIOS_TIMEOUT
         });
 
         if (response.data.status === 'OK' && response.data.results.length > 0) {
@@ -85,7 +89,8 @@ async function getRouteMatrix(points) {
                 'Content-Type': 'application/json',
                 'X-Goog-Api-Key': apiKey,
                 'X-Goog-FieldMask': 'originIndex,destinationIndex,duration,status'
-            }
+            },
+            timeout: AXIOS_TIMEOUT
         });
 
         // The response is an array of matrix elements or newline separated JSON depending on stream,
@@ -189,8 +194,7 @@ async function optimizeSmartRoute(startLocation, orders) {
                     durationMap[i][j] = 0;
                 } else {
                     const dist = getHaversineDistance(points[i], points[j]);
-                    // Estimate duration assuming average speed of 30 km/h (8.33 m/s)
-                    durationMap[i][j] = dist / 8.33;
+                    durationMap[i][j] = dist / AVG_SPEED_MPS;
                 }
             }
         }
@@ -335,29 +339,24 @@ function generateNavigationLink(points) {
     
     const startPoint = points[0];
     const endPoint = points[points.length - 1];
-    
-    // Origin: Driver's location
-    const originStr = getLatLngStr(startPoint);
-    
-    // Destination: use raw coordinates as primary query to guarantee resolution
-    const destStr = getLatLngStr(endPoint);
+
+    const originStr = encodeURIComponent(getLatLngStr(startPoint));
+    const destStr = encodeURIComponent(getLatLngStr(endPoint));
     let destPlaceIdStr = '';
-    
+
     if (endPoint.place_id) {
-        destPlaceIdStr = `&destination_place_id=${endPoint.place_id}`;
+        destPlaceIdStr = `&destination_place_id=${encodeURIComponent(endPoint.place_id)}`;
     }
-    
+
     const waypoints = points.slice(1, -1);
     let waypointsStr = '';
     let waypointsPlaceIdsStr = '';
-    
+
     if (waypoints.length > 0) {
-        // Use coordinates for waypoints as primary query to guarantee resolution
-        const waypointParts = waypoints.map(wp => getLatLngStr(wp));
+        const waypointParts = waypoints.map(wp => encodeURIComponent(getLatLngStr(wp)));
         waypointsStr = '&waypoints=' + waypointParts.join('%7C');
-        
-        // Add waypoints place IDs
-        const placeIds = waypoints.map(wp => wp.place_id || '');
+
+        const placeIds = waypoints.map(wp => wp.place_id ? encodeURIComponent(wp.place_id) : '');
         if (placeIds.some(id => id !== '')) {
             waypointsPlaceIdsStr = '&waypoints_place_ids=' + placeIds.join('%7C');
         }
@@ -385,13 +384,17 @@ async function computePolylineRoute(points) {
     }));
 
     try {
-        console.log(`Fetching Route Polyline (Routes API) for ${points.length} points...`);
+        const numPoints = points.length;
+        const useOptimal = (numPoints * numPoints) <= 100;
+        const routingPreference = useOptimal ? 'TRAFFIC_AWARE_OPTIMAL' : 'TRAFFIC_AWARE';
+
+        console.log(`Fetching Route Polyline (Routes API) for ${points.length} points (routingPreference: ${routingPreference})...`);
         const response = await axios.post('https://routes.googleapis.com/directions/v2:computeRoutes', {
             origin: origin,
             destination: destination,
             intermediates: intermediates,
             travelMode: 'TWO_WHEELER',
-            routingPreference: 'TRAFFIC_AWARE_OPTIMAL',
+            routingPreference: routingPreference,
             polylineQuality: 'HIGH_QUALITY',
             routeModifiers: {
                 avoidTolls: true,
@@ -402,7 +405,8 @@ async function computePolylineRoute(points) {
                 'Content-Type': 'application/json',
                 'X-Goog-Api-Key': apiKey,
                 'X-Goog-FieldMask': 'routes.polyline.encodedPolyline,routes.duration,routes.distanceMeters'
-            }
+            },
+            timeout: AXIOS_TIMEOUT
         });
 
         if (response.data && response.data.routes && response.data.routes.length > 0) {
@@ -439,7 +443,8 @@ async function searchPlaceText(query) {
                 'Content-Type': 'application/json',
                 'X-Goog-Api-Key': apiKey,
                 'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location'
-            }
+            },
+            timeout: AXIOS_TIMEOUT
         });
 
         if (response.data && response.data.places && response.data.places.length > 0) {
@@ -481,7 +486,8 @@ async function validateAddressOffice(addressText) {
         }, {
             headers: {
                 'Content-Type': 'application/json'
-            }
+            },
+            timeout: AXIOS_TIMEOUT
         });
 
         if (response.data && response.data.result) {
