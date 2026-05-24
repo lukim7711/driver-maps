@@ -127,6 +127,67 @@ function generatePermutations(arr) {
 }
 
 /**
+ * Calculate total duration of a route.
+ */
+function calculateRouteDuration(route, durationMap) {
+    let total = 0;
+    for (let i = 0; i < route.length - 1; i++) {
+        const d = durationMap[route[i]] && durationMap[route[i]][route[i + 1]];
+        if (d === undefined || d === Infinity) return Infinity;
+        total += d;
+    }
+    return total;
+}
+
+/**
+ * Check if a route satisfies pickup-before-delivery constraints.
+ */
+function isRouteValid(route, rules) {
+    for (const rule of rules) {
+        const pPos = route.indexOf(rule.pIdx);
+        const dPos = route.indexOf(rule.dIdx);
+        if (pPos === -1 || dPos === -1 || pPos > dPos) return false;
+    }
+    return true;
+}
+
+/**
+ * 2-opt local search to improve a route while preserving constraints.
+ * Tries reversing segments of the route to eliminate crossings.
+ */
+function twoOpt(route, durationMap, rules) {
+    let improved = true;
+    let bestRoute = [...route];
+    let bestDuration = calculateRouteDuration(route, durationMap);
+
+    while (improved) {
+        improved = false;
+        // Try all pairs of edges (i, i+1) and (j, j+1)
+        for (let i = 0; i < bestRoute.length - 2; i++) {
+            for (let j = i + 2; j < bestRoute.length - 1; j++) {
+                // Reverse segment from i+1 to j
+                const newRoute = [...bestRoute];
+                const segment = newRoute.slice(i + 1, j + 1).reverse();
+                newRoute.splice(i + 1, j - i, ...segment);
+
+                // Check constraint validity
+                if (!isRouteValid(newRoute, rules)) continue;
+
+                // Check if improved
+                const newDuration = calculateRouteDuration(newRoute, durationMap);
+                if (newDuration < bestDuration) {
+                    bestRoute = newRoute;
+                    bestDuration = newDuration;
+                    improved = true;
+                }
+            }
+        }
+    }
+
+    return bestRoute;
+}
+
+/**
  * Calculates the great-circle distance between two points on the Earth using the Haversine formula.
  * @param {{lat: number, lng: number}} p1
  * @param {{lat: number, lng: number}} p2
@@ -166,43 +227,18 @@ async function optimizeSmartRoute(startLocation, orders) {
         rules.push({ pIdx, dIdx });
     }
 
-    // 2. Fetch Route Matrix (or fallback to local Haversine)
-    let durationMap = {};
-    let matrixSuccess = false;
-
-    try {
-        const matrix = await getRouteMatrix(points);
-        if (matrix && Array.isArray(matrix)) {
-            for (const item of matrix) {
-                const oIdx = item.originIndex || 0;
-                const dIdx = item.destinationIndex || 0;
-                if (!durationMap[oIdx]) durationMap[oIdx] = {};
-                
-                // Duration format is like "120s"
-                if (item.duration) {
-                    durationMap[oIdx][dIdx] = parseInt(item.duration.replace('s', ''));
-                } else {
-                    durationMap[oIdx][dIdx] = Infinity; // Path invalid or error
-                }
-            }
-            matrixSuccess = true;
-        }
-    } catch (error) {
-        console.warn("Could not get route matrix, falling back to local optimization:", error.message);
-    }
-
-    if (!matrixSuccess) {
-        console.log("Using local Haversine distance matrix fallback for route optimization...");
-        durationMap = {};
-        for (let i = 0; i < points.length; i++) {
-            durationMap[i] = {};
-            for (let j = 0; j < points.length; j++) {
-                if (i === j) {
-                    durationMap[i][j] = 0;
-                } else {
-                    const dist = getHaversineDistance(points[i], points[j]);
-                    durationMap[i][j] = dist / AVG_SPEED_MPS;
-                }
+    // 2. Build local Haversine distance matrix for TSP solving
+    // We always use Haversine for the solver to avoid API quota limits,
+    // incomplete matrix data, and event-loop blocking from API latency.
+    const durationMap = {};
+    for (let i = 0; i < points.length; i++) {
+        durationMap[i] = {};
+        for (let j = 0; j < points.length; j++) {
+            if (i === j) {
+                durationMap[i][j] = 0;
+            } else {
+                const dist = getHaversineDistance(points[i], points[j]);
+                durationMap[i][j] = dist / AVG_SPEED_MPS;
             }
         }
     }
@@ -255,19 +291,19 @@ async function optimizeSmartRoute(startLocation, orders) {
             }
         }
     } else {
-        // Greedy Nearest Neighbor heuristic for larger N to prevent event-loop blocking
+        // Phase 1: Greedy Nearest Neighbor for initial feasible route
         const allIndices = [];
         for (let i = 1; i < points.length; i++) allIndices.push(i);
         
-        const pickupToDelivery = {};
+        const deliveryToPickup = {};
         const isDelivery = new Set();
         for (const rule of rules) {
-            pickupToDelivery[rule.pIdx] = rule.dIdx;
+            deliveryToPickup[rule.dIdx] = rule.pIdx;
             isDelivery.add(rule.dIdx);
         }
         
         const visited = new Set([0]);
-        bestRoute = [0];
+        let greedyRoute = [0];
         let current = 0;
         minDuration = 0;
         
@@ -277,7 +313,7 @@ async function optimizeSmartRoute(startLocation, orders) {
             
             for (const idx of allIndices) {
                 if (visited.has(idx)) continue;
-                if (isDelivery.has(idx) && !visited.has(pickupToDelivery[idx])) continue;
+                if (isDelivery.has(idx) && !visited.has(deliveryToPickup[idx])) continue;
                 
                 const d = durationMap[current] && durationMap[current][idx];
                 const dur = (d !== undefined ? d : Infinity);
@@ -292,14 +328,19 @@ async function optimizeSmartRoute(startLocation, orders) {
                 break;
             }
             
-            bestRoute.push(nearestIdx);
+            greedyRoute.push(nearestIdx);
             visited.add(nearestIdx);
             minDuration += nearestDuration;
             current = nearestIdx;
         }
+
+        // Phase 2: 2-opt local search to eliminate crossings and improve route quality
+        console.log(`Greedy route has ${greedyRoute.length} waypoints. Running 2-opt improvement...`);
+        bestRoute = twoOpt(greedyRoute, durationMap, rules);
+        minDuration = calculateRouteDuration(bestRoute, durationMap);
     }
 
-    console.log(`Optimization complete. Best route duration: ${Math.round(minDuration/60)} mins.`);
+    console.log(`Optimization complete. Route has ${bestRoute ? bestRoute.length : 0} waypoints. Best route duration: ${Math.round(minDuration/60)} mins.`);
 
     // 5. Reconstruct the points array in the best order as structured waypoint objects
     if (bestRoute) {
