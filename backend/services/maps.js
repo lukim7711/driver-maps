@@ -144,233 +144,128 @@ function getHaversineDistance(p1, p2) {
 }
 
 /**
- * Optimizes the route ensuring pickups happen before deliveries.
+ * 2-Phase TSP Solver: Pickup-All-First, Then Delivery.
+ * Phase 1: Brute-force optimal ordering of all pickups from driver start.
+ * Phase 2: Brute-force optimal ordering of all deliveries from last pickup.
+ * Complexity: 2 * N! permutations. For N=6: 2 * 720 = 1,440 (very fast in Node.js).
  * @param {{lat: number, lng: number}} startLocation Driver's current location
  * @param {Array<{pickup: {coordinates: {lat: number, lng: number}}, delivery: {coordinates: {lat: number, lng: number}}}>} orders
- * @returns {Promise<Array<{lat: number, lng: number}>>} Optimized ordered points
+ * @returns {Promise<Array<Object>>} Optimized ordered waypoints
  */
 async function optimizeSmartRoute(startLocation, orders) {
     if (!startLocation || !orders || orders.length === 0) return [];
 
-    // 1. Build points array and define rules
-    const points = [startLocation];
-    const rules = []; // { pickupIdx, deliveryIdx }
+    // 1. Build separate pickup and delivery arrays with metadata
+    const pickups = orders.map((o, i) => ({
+        type: 'pickup',
+        name: o.pickup.name,
+        address: o.pickup.address,
+        coordinates: o.pickup.coordinates,
+        place_id: o.pickup.coordinates?.place_id,
+        order_index: i
+    }));
 
-    for (const order of orders) {
-        points.push(order.pickup.coordinates);
-        const pIdx = points.length - 1;
-        
-        points.push(order.delivery.coordinates);
-        const dIdx = points.length - 1;
-        
-        rules.push({ pIdx, dIdx });
-    }
+    const deliveries = orders.map((o, i) => ({
+        type: 'delivery',
+        name: o.delivery.name,
+        address: o.delivery.address,
+        coordinates: o.delivery.coordinates,
+        place_id: o.delivery.coordinates?.place_id,
+        order_index: i
+    }));
 
-    // 2. Fetch Route Matrix (or fallback to local Haversine)
-    let durationMap = {};
-    let matrixSuccess = false;
+    // 2. Build distance lookup using Haversine (fast, no API call needed for solver)
+    // We need: driver→pickups, pickups→pickups, pickups→deliveries, deliveries→deliveries
+    const allPoints = [startLocation, ...pickups.map(p => p.coordinates), ...deliveries.map(d => d.coordinates)];
+    const n = orders.length;
 
-    try {
-        const matrix = await getRouteMatrix(points);
-        if (matrix && Array.isArray(matrix)) {
-            for (const item of matrix) {
-                const oIdx = item.originIndex || 0;
-                const dIdx = item.destinationIndex || 0;
-                if (!durationMap[oIdx]) durationMap[oIdx] = {};
-                
-                // Duration format is like "120s"
-                if (item.duration) {
-                    durationMap[oIdx][dIdx] = parseInt(item.duration.replace('s', ''));
-                } else {
-                    durationMap[oIdx][dIdx] = Infinity; // Path invalid or error
-                }
-            }
-            matrixSuccess = true;
-        }
-    } catch (error) {
-        console.warn("Could not get route matrix, falling back to local optimization:", error.message);
-    }
-
-    if (!matrixSuccess) {
-        console.log("Using local Haversine distance matrix fallback for route optimization...");
-        durationMap = {};
-        for (let i = 0; i < points.length; i++) {
-            durationMap[i] = {};
-            for (let j = 0; j < points.length; j++) {
-                if (i === j) {
-                    durationMap[i][j] = 0;
-                } else {
-                    const dist = getHaversineDistance(points[i], points[j]);
-                    durationMap[i][j] = dist / AVG_SPEED_MPS;
-                }
-            }
-        }
-    }
-
-    // 3. Route optimization: brute-force for small N, greedy heuristic for large N
-    let bestRoute = null;
-    let minDuration = Infinity;
-
-    if (orders.length <= 3) {
-        // Brute-force is feasible up to 6 order points (3 orders = 720 permutations)
-        const indicesToPermute = [];
-        for (let i = 1; i < points.length; i++) {
-            indicesToPermute.push(i);
-        }
-        
-        const permutations = generatePermutations(indicesToPermute);
-        
-        // 4. Evaluate permutations
-        for (const perm of permutations) {
-            const fullRoute = [0, ...perm];
-            
-            let isValid = true;
-            for (const rule of rules) {
-                const pPos = fullRoute.indexOf(rule.pIdx);
-                const dPos = fullRoute.indexOf(rule.dIdx);
-                if (pPos > dPos) {
-                    isValid = false;
-                    break;
-                }
-            }
-
-            if (isValid) {
-                let totalDuration = 0;
-                for (let i = 0; i < fullRoute.length - 1; i++) {
-                    const originIdx = fullRoute[i];
-                    const destIdx = fullRoute[i+1];
-                    
-                    const duration = durationMap[originIdx] && durationMap[originIdx][destIdx];
-                    if (duration !== undefined) {
-                        totalDuration += duration;
-                    } else {
-                        totalDuration += Infinity;
-                    }
-                }
-
-                if (totalDuration < minDuration) {
-                    minDuration = totalDuration;
-                    bestRoute = fullRoute;
-                }
-            }
-        }
-    } else {
-        // Greedy Nearest Neighbor heuristic for larger N to prevent event-loop blocking
-        const allIndices = [];
-        for (let i = 1; i < points.length; i++) allIndices.push(i);
-        
-        const pickupToDelivery = {};
-        const isDelivery = new Set();
-        for (const rule of rules) {
-            pickupToDelivery[rule.pIdx] = rule.dIdx;
-            isDelivery.add(rule.dIdx);
-        }
-        
-        const visited = new Set([0]);
-        bestRoute = [0];
-        let current = 0;
-        minDuration = 0;
-        
-        while (visited.size < points.length) {
-            let nearestIdx = -1;
-            let nearestDuration = Infinity;
-            
-            for (const idx of allIndices) {
-                if (visited.has(idx)) continue;
-                if (isDelivery.has(idx) && !visited.has(pickupToDelivery[idx])) continue;
-                
-                const d = durationMap[current] && durationMap[current][idx];
-                const dur = (d !== undefined ? d : Infinity);
-                if (dur < nearestDuration) {
-                    nearestDuration = dur;
-                    nearestIdx = idx;
-                }
-            }
-            
-            if (nearestIdx === -1) {
-                console.error('TSP heuristic stuck: no valid next point. Falling back to partial route.');
-                break;
-            }
-            
-            bestRoute.push(nearestIdx);
-            visited.add(nearestIdx);
-            minDuration += nearestDuration;
-            current = nearestIdx;
-        }
-    }
-
-    console.log(`Optimization complete. Best route duration: ${Math.round(minDuration/60)} mins.`);
-
-    // 5. Reconstruct the points array in the best order as structured waypoint objects
-    if (bestRoute) {
-        return bestRoute.map(idx => {
-            if (idx === 0) {
-                return {
-                    type: 'driver',
-                    name: 'Driver Position',
-                    coordinates: startLocation
-                };
-            }
-            
-            const orderIdx = Math.floor((idx - 1) / 2);
-            const isPickup = (idx - 1) % 2 === 0;
-            const order = orders[orderIdx];
-            
-            if (isPickup) {
-                return {
-                    type: 'pickup',
-                    name: order.pickup.name,
-                    address: order.pickup.address,
-                    coordinates: order.pickup.coordinates,
-                    place_id: order.pickup.coordinates?.place_id,
-                    order_index: orderIdx
-                };
+    const haversineMap = {};
+    for (let i = 0; i < allPoints.length; i++) {
+        haversineMap[i] = {};
+        for (let j = 0; j < allPoints.length; j++) {
+            if (i === j) {
+                haversineMap[i][j] = 0;
             } else {
-                return {
-                    type: 'delivery',
-                    name: order.delivery.name,
-                    address: order.delivery.address,
-                    coordinates: order.delivery.coordinates,
-                    place_id: order.delivery.coordinates?.place_id,
-                    order_index: orderIdx
-                };
+                const dist = getHaversineDistance(allPoints[i], allPoints[j]);
+                haversineMap[i][j] = dist / AVG_SPEED_MPS;
             }
-        });
+        }
     }
 
-    // Fallback if bestRoute is not found
-    return points.map((p, idx) => {
-        if (idx === 0) {
-            return {
-                type: 'driver',
-                name: 'Driver Position',
-                coordinates: startLocation
-            };
+    // Helper: get duration between any two points using index
+    const getDuration = (fromIdx, toIdx) => {
+        const d = haversineMap[fromIdx] && haversineMap[fromIdx][toIdx];
+        return d !== undefined ? d : Infinity;
+    };
+
+    // 3. Phase 1: Find optimal pickup order (brute-force all permutations)
+    const pickupIndices = pickups.map((_, i) => i); // 0..n-1
+    const pickupPerms = generatePermutations(pickupIndices);
+
+    let bestPickupOrder = null;
+    let minPickupDuration = Infinity;
+
+    // Driver is at index 0 in allPoints. Pickups are at indices 1..n
+    for (const perm of pickupPerms) {
+        let totalDuration = 0;
+        let currentIdx = 0; // driver
+
+        for (const pIdx of perm) {
+            const pickupPointIdx = 1 + pIdx; // pickups start at index 1
+            totalDuration += getDuration(currentIdx, pickupPointIdx);
+            currentIdx = pickupPointIdx;
         }
-        const orderIdx = Math.floor((idx - 1) / 2);
-        const isPickup = (idx - 1) % 2 === 0;
-        const order = orders[orderIdx];
-        
-        if (isPickup) {
-            return {
-                type: 'pickup',
-                name: order.pickup.name,
-                address: order.pickup.address,
-                coordinates: order.pickup.coordinates,
-                place_id: order.pickup.coordinates?.place_id,
-                order_index: orderIdx
-            };
-        } else {
-            return {
-                type: 'delivery',
-                name: order.delivery.name,
-                address: order.delivery.address,
-                coordinates: order.delivery.coordinates,
-                place_id: order.delivery.coordinates?.place_id,
-                order_index: orderIdx
-            };
+
+        if (totalDuration < minPickupDuration) {
+            minPickupDuration = totalDuration;
+            bestPickupOrder = perm;
         }
-    });
+    }
+
+    // 4. Phase 2: Find optimal delivery order (brute-force all permutations)
+    // Start from last pickup position
+    const lastPickupIdx = 1 + bestPickupOrder[pickups.length - 1];
+    const deliveryIndices = deliveries.map((_, i) => i); // 0..n-1
+    const deliveryPerms = generatePermutations(deliveryIndices);
+
+    let bestDeliveryOrder = null;
+    let minDeliveryDuration = Infinity;
+
+    for (const perm of deliveryPerms) {
+        let totalDuration = 0;
+        let currentIdx = lastPickupIdx;
+
+        for (const dIdx of perm) {
+            const deliveryPointIdx = 1 + n + dIdx; // deliveries start at index 1+n
+            totalDuration += getDuration(currentIdx, deliveryPointIdx);
+            currentIdx = deliveryPointIdx;
+        }
+
+        if (totalDuration < minDeliveryDuration) {
+            minDeliveryDuration = totalDuration;
+            bestDeliveryOrder = perm;
+        }
+    }
+
+    const totalDuration = minPickupDuration + minDeliveryDuration;
+    console.log(`2-Phase TSP optimization complete. Pickup: ${Math.round(minPickupDuration/60)} mins, Delivery: ${Math.round(minDeliveryDuration/60)} mins, Total: ${Math.round(totalDuration/60)} mins.`);
+
+    // 5. Reconstruct the final route
+    const route = [{
+        type: 'driver',
+        name: 'Driver Position',
+        coordinates: startLocation
+    }];
+
+    for (const pIdx of bestPickupOrder) {
+        route.push(pickups[pIdx]);
+    }
+
+    for (const dIdx of bestDeliveryOrder) {
+        route.push(deliveries[dIdx]);
+    }
+
+    return route;
 }
 
 /**
