@@ -48,10 +48,14 @@ async function getCachedAddress(normalizedQuery, apiType) {
             }
         }
 
-        db.collection(CACHE_COLLECTION).doc(docId).update({
-            hit_count: Firestore.FieldValue.increment(1),
-            last_used: Firestore.FieldValue.serverTimestamp()
-        }).catch(() => {});
+        try {
+            await db.collection(CACHE_COLLECTION).doc(docId).update({
+                hit_count: Firestore.FieldValue.increment(1),
+                last_used: Firestore.FieldValue.serverTimestamp()
+            });
+        } catch (err) {
+            console.warn('Cache increment error:', err.message);
+        }
 
         return {
             lat: cached.lat,

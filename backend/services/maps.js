@@ -93,10 +93,17 @@ async function getRouteMatrix(points) {
             timeout: AXIOS_TIMEOUT
         });
 
-        // The response is an array of matrix elements or newline separated JSON depending on stream,
-        // but axios aggregates it if it's an array.
-        // Actually, computeRouteMatrix might return streaming JSON by default, but standard HTTP returns an array.
-        return response.data;
+        // computeRouteMatrix may return NDJSON (newline-delimited JSON) in some contexts.
+        let matrixData = response.data;
+        if (typeof matrixData === 'string' && matrixData.trim().length > 0) {
+            try {
+                matrixData = matrixData.split('\n').filter(line => line.trim().length > 0).map(JSON.parse);
+            } catch (parseErr) {
+                console.error('Failed to parse NDJSON route matrix response:', parseErr.message);
+                return null;
+            }
+        }
+        return matrixData;
     } catch (error) {
         console.error('Error fetching route matrix:', error.message);
         if (error.response && error.response.data) {
@@ -200,52 +207,95 @@ async function optimizeSmartRoute(startLocation, orders) {
         }
     }
 
-    // 3. Generate permutations for indices 1 to N
-    const indicesToPermute = [];
-    for (let i = 1; i < points.length; i++) {
-        indicesToPermute.push(i);
-    }
-    
-    const permutations = generatePermutations(indicesToPermute);
-    
-    // 4. Evaluate permutations
+    // 3. Route optimization: brute-force for small N, greedy heuristic for large N
     let bestRoute = null;
     let minDuration = Infinity;
 
-    for (const perm of permutations) {
-        // Construct full route: Start -> perm
-        const fullRoute = [0, ...perm];
-        
-        // Check validity (Pickup before Delivery)
-        let isValid = true;
-        for (const rule of rules) {
-            const pPos = fullRoute.indexOf(rule.pIdx);
-            const dPos = fullRoute.indexOf(rule.dIdx);
-            if (pPos > dPos) {
-                isValid = false;
-                break;
-            }
+    if (orders.length <= 3) {
+        // Brute-force is feasible up to 6 order points (3 orders = 720 permutations)
+        const indicesToPermute = [];
+        for (let i = 1; i < points.length; i++) {
+            indicesToPermute.push(i);
         }
-
-        if (isValid) {
-            // Calculate total duration using matrix
-            let totalDuration = 0;
-            for (let i = 0; i < fullRoute.length - 1; i++) {
-                const originIdx = fullRoute[i];
-                const destIdx = fullRoute[i+1];
-                
-                const duration = durationMap[originIdx] && durationMap[originIdx][destIdx];
-                if (duration !== undefined) {
-                    totalDuration += duration;
-                } else {
-                    totalDuration += Infinity;
+        
+        const permutations = generatePermutations(indicesToPermute);
+        
+        // 4. Evaluate permutations
+        for (const perm of permutations) {
+            const fullRoute = [0, ...perm];
+            
+            let isValid = true;
+            for (const rule of rules) {
+                const pPos = fullRoute.indexOf(rule.pIdx);
+                const dPos = fullRoute.indexOf(rule.dIdx);
+                if (pPos > dPos) {
+                    isValid = false;
+                    break;
                 }
             }
 
-            if (totalDuration < minDuration) {
-                minDuration = totalDuration;
-                bestRoute = fullRoute;
+            if (isValid) {
+                let totalDuration = 0;
+                for (let i = 0; i < fullRoute.length - 1; i++) {
+                    const originIdx = fullRoute[i];
+                    const destIdx = fullRoute[i+1];
+                    
+                    const duration = durationMap[originIdx] && durationMap[originIdx][destIdx];
+                    if (duration !== undefined) {
+                        totalDuration += duration;
+                    } else {
+                        totalDuration += Infinity;
+                    }
+                }
+
+                if (totalDuration < minDuration) {
+                    minDuration = totalDuration;
+                    bestRoute = fullRoute;
+                }
             }
+        }
+    } else {
+        // Greedy Nearest Neighbor heuristic for larger N to prevent event-loop blocking
+        const allIndices = [];
+        for (let i = 1; i < points.length; i++) allIndices.push(i);
+        
+        const pickupToDelivery = {};
+        const isDelivery = new Set();
+        for (const rule of rules) {
+            pickupToDelivery[rule.pIdx] = rule.dIdx;
+            isDelivery.add(rule.dIdx);
+        }
+        
+        const visited = new Set([0]);
+        bestRoute = [0];
+        let current = 0;
+        minDuration = 0;
+        
+        while (visited.size < points.length) {
+            let nearestIdx = -1;
+            let nearestDuration = Infinity;
+            
+            for (const idx of allIndices) {
+                if (visited.has(idx)) continue;
+                if (isDelivery.has(idx) && !visited.has(pickupToDelivery[idx])) continue;
+                
+                const d = durationMap[current] && durationMap[current][idx];
+                const dur = (d !== undefined ? d : Infinity);
+                if (dur < nearestDuration) {
+                    nearestDuration = dur;
+                    nearestIdx = idx;
+                }
+            }
+            
+            if (nearestIdx === -1) {
+                console.error('TSP heuristic stuck: no valid next point. Falling back to partial route.');
+                break;
+            }
+            
+            bestRoute.push(nearestIdx);
+            visited.add(nearestIdx);
+            minDuration += nearestDuration;
+            current = nearestIdx;
         }
     }
 
@@ -523,6 +573,5 @@ module.exports = {
     optimizeSmartRoute,
     computePolylineRoute,
     searchPlaceText,
-    validateAddressOffice,
     getHaversineDistance
 };

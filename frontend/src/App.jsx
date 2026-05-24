@@ -1,14 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
-import { 
-  Upload, 
-  Navigation, 
-  CheckCircle2, 
-  FileImage, 
-  Trash2, 
-  TrendingUp, 
-  AlertCircle, 
+import {
+  Upload,
+  Navigation,
+  CheckCircle2,
+  FileImage,
+  Trash2,
+  TrendingUp,
+  AlertCircle,
   HelpCircle,
-  Zap
+  Zap,
+  Image,
+  Check,
+  ArrowRight
 } from 'lucide-react';
 import MapComponent from './components/MapComponent';
 import { compressImages } from './utils/imageCompress';
@@ -43,6 +46,11 @@ export default function App() {
     total: 0
   });
 
+  // Track per-file preview URLs and compression states
+  const [filePreviews, setFilePreviews] = useState({});
+  const [fileCompressionStates, setFileCompressionStates] = useState({});
+  const [dragOver, setDragOver] = useState(false);
+
   // Ref to access latest files in async callbacks without stale closure
   const filesRef = useRef(files);
 
@@ -54,6 +62,16 @@ export default function App() {
   useEffect(() => {
     filesRef.current = files;
   });
+
+  // Cleanup object URLs on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(filePreviews).forEach(url => {
+        if (url && url.startsWith('blob:')) URL.revokeObjectURL(url);
+      });
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!compressionTask) return;
@@ -78,12 +96,29 @@ export default function App() {
           setCompressionStatus(prev => ({ ...prev, completed, total }));
         });
 
+        // Track per-file compression states
+        const newCompressionStates = {};
+        results.forEach((res, idx) => {
+          const raw = incomingFiles[idx];
+          const key = `${raw.name}-${raw.size}`;
+          newCompressionStates[key] = {
+            skipped: res.skipped,
+            originalSize: res.originalSize,
+            compressedSize: res.compressedSize
+          };
+        });
+        setFileCompressionStates(prev => ({ ...prev, ...newCompressionStates }));
+
         // Replace raw files with compressed versions
         setFiles(prev => {
           const newFiles = [...prev];
           incomingFiles.forEach((raw, idx) => {
             const foundIdx = newFiles.findIndex(f => f.name === raw.name && f.size === raw.size);
             if (foundIdx >= 0 && results[idx] && !results[idx].skipped) {
+              // Revoke old preview URL for this file before replacing
+              const oldKey = `${raw.name}-${raw.size}`;
+              const oldUrl = filePreviews[oldKey];
+              if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl);
               newFiles[foundIdx] = results[idx].file;
             }
           });
@@ -119,30 +154,84 @@ export default function App() {
     };
 
     runCompression();
-  }, [compressionTask]);
+  }, [compressionTask, filePreviews]);
 
   // File Upload Handlers
+  const processIncomingFiles = (incomingFiles) => {
+    const totalAllowed = 5 - files.length;
+    if (totalAllowed <= 0) {
+      setError('Maksimal 5 gambar. Hapus file yang ada untuk menambah baru.');
+      return;
+    }
+    const filesToAdd = incomingFiles.slice(0, totalAllowed);
+
+    // Create preview URLs for each new file
+    const newPreviews = {};
+    filesToAdd.forEach(file => {
+      const key = `${file.name}-${file.size}`;
+      newPreviews[key] = URL.createObjectURL(file);
+    });
+    setFilePreviews(prev => ({ ...prev, ...newPreviews }));
+
+    // Save raw files to state immediately (visible in UI right away)
+    setFiles(prev => [...prev, ...filesToAdd]);
+    setError(null);
+
+    // Trigger compression via useEffect (separate from event handler batching)
+    setCompressionTask({ files: filesToAdd, id: Date.now() });
+  };
+
   const handleFileChange = (e) => {
     if (e.target.files) {
       const selectedFiles = Array.from(e.target.files);
-      const totalAllowed = 5 - files.length;
-      if (totalAllowed <= 0) {
-        setError('Maksimal 5 gambar. Hapus file yang ada untuk menambah baru.');
-        return;
-      }
-      const incomingFiles = selectedFiles.slice(0, totalAllowed);
-
-      // Save raw files to state immediately (visible in UI right away)
-      setFiles(prev => [...prev, ...incomingFiles]);
+      processIncomingFiles(selectedFiles);
       e.target.value = '';
-      setError(null);
+    }
+  };
 
-      // Trigger compression via useEffect (separate from event handler batching)
-      setCompressionTask({ files: incomingFiles, id: Date.now() });
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(true);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const droppedFiles = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+      if (droppedFiles.length > 0) {
+        processIncomingFiles(droppedFiles);
+      } else {
+        setError('Hanya file gambar yang diizinkan. Silakan drop file gambar.');
+      }
     }
   };
 
   const handleRemoveFile = (indexToRemove) => {
+    const fileToRemove = files[indexToRemove];
+    if (fileToRemove) {
+      const key = `${fileToRemove.name}-${fileToRemove.size}`;
+      const url = filePreviews[key];
+      if (url && url.startsWith('blob:')) URL.revokeObjectURL(url);
+      setFilePreviews(prev => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      setFileCompressionStates(prev => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
     setFiles(files.filter((_, idx) => idx !== indexToRemove));
   };
 
@@ -155,6 +244,7 @@ export default function App() {
         },
         () => {
           console.warn('Geolocation access denied/failed, using default coordinates (Jakarta Barat).');
+          setError('Akses lokasi ditolak. Menggunakan koordinat default Jakarta Barat. Aktifkan GPS untuk rute lebih akurat.');
         }
       );
     }
@@ -198,11 +288,9 @@ export default function App() {
 
       if (response.ok && result.success) {
         setRoutesData(result.routes || null);
-        setWaypoints([]);
-        setRouteDetails(null);
-        setNavigationLink(null);
-        if (result.warning) {
-          setError(result.warning);
+        if (result.failed_orders && result.failed_orders.length > 0) {
+          const names = result.failed_orders.map(o => o.name).join(', ');
+          setError(`Beberapa alamat tidak dapat diproses: ${names}. Periksa kembali alamat pada screenshot.`);
         }
       } else {
         throw new Error(result.error || result.details || 'Terjadi kesalahan pada server.');
@@ -215,12 +303,14 @@ export default function App() {
     }
   };
 
-  // Convert duration string "Xs" or number to descriptive format
+  // Convert duration string "Xs", number, or Routes API V2 object to descriptive format
   const formatDuration = (durationVal) => {
     if (!durationVal) return null;
     let seconds;
     if (typeof durationVal === 'string') {
       seconds = parseInt(durationVal.replace('s', ''), 10);
+    } else if (typeof durationVal === 'object' && durationVal.seconds !== undefined) {
+      seconds = parseInt(durationVal.seconds, 10);
     } else {
       seconds = durationVal;
     }
@@ -269,18 +359,25 @@ export default function App() {
               <h2 className="section-title"><Upload size={18} /> Unggah Screenshot Struk</h2>
               
               <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <label className="upload-zone">
-                  <input 
-                    type="file" 
-                    multiple 
-                    accept="image/*" 
-                    onChange={handleFileChange} 
+                <label
+                  className={`upload-zone ${dragOver ? 'dragover' : ''}`}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                >
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/*"
+                    onChange={handleFileChange}
                     className="checkbox-input"
                   />
                   <div className="upload-icon-wrapper">
-                    <Upload size={22} />
+                    {dragOver ? <Image size={22} color="#00f2fe" /> : <Upload size={22} />}
                   </div>
-                  <span className="upload-text">Pilih atau Drag File di Sini</span>
+                  <span className="upload-text">
+                    {dragOver ? 'Lepaskan file di sini' : 'Pilih atau Drag File di Sini'}
+                  </span>
                   <span className="upload-subtext">Maksimal 5 file screenshot detail pesanan</span>
                 </label>
 
@@ -321,23 +418,53 @@ export default function App() {
                   </div>
                 )}
 
-                {/* List of chosen files */}
+                {/* List of chosen files with thumbnails */}
                 {files.length > 0 && (
                   <div className="file-previews">
-                    {files.map((file, idx) => (
-                      <div key={idx} className="preview-chip">
-                        <FileImage size={12} />
-                        <span className="file-chip-name" style={{ maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {file.name}
-                        </span>
-                        <span style={{ fontSize: '9px', color: '#64748b', marginLeft: 'auto', flexShrink: 0 }}>
-                          {formatFileSize(file.size)}
-                        </span>
-                        <button type="button" onClick={() => handleRemoveFile(idx)} className="remove-file-btn">
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    ))}
+                    {files.map((file, idx) => {
+                      const key = `${file.name}-${file.size}`;
+                      const previewUrl = filePreviews[key];
+                      const compState = fileCompressionStates[key];
+
+                      return (
+                        <div key={idx} className="preview-card">
+                          <div className="preview-thumbnail-wrapper">
+                            {previewUrl ? (
+                              <img src={previewUrl} alt={file.name} className="preview-thumbnail" />
+                            ) : (
+                              <div className="preview-thumbnail-placeholder">
+                                <FileImage size={20} />
+                              </div>
+                            )}
+                          </div>
+                          <div className="preview-info">
+                            <span className="preview-name" title={file.name}>
+                              {file.name}
+                            </span>
+                            <div className="preview-meta">
+                              <span className="preview-size">{formatFileSize(file.size)}</span>
+                              {compState && (
+                                <span className={`compression-badge ${compState.skipped ? 'skipped' : 'compressed'}`}>
+                                  {compState.skipped ? (
+                                    <><ArrowRight size={10} /> Dilewati</>
+                                  ) : (
+                                    <><Check size={10} /> Dikompresi</>
+                                  )}
+                                </span>
+                              )}
+                              {compState && !compState.skipped && (
+                                <span className="preview-size-delta">
+                                  {formatFileSize(compState.originalSize)} → {formatFileSize(compState.compressedSize)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <button type="button" onClick={() => handleRemoveFile(idx)} className="remove-file-btn" title="Hapus file">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
 
@@ -496,9 +623,9 @@ export default function App() {
                             <div className="timeline-actions">
                               {/* Deep Link Navigation (disable for driver start location) */}
                               {wp.type !== 'driver' && (
-                                <a 
-                                  href={`https://www.google.com/maps/dir/?api=1&destination=${wp.coordinates.lat},${wp.coordinates.lng}&travelmode=two-wheeler`}
-                                  target="_blank" 
+                                <a
+                                  href={`https://www.google.com/maps/dir/?api=1&destination=${wp.coordinates.lat},${wp.coordinates.lng}${wp.place_id ? `&destination_place_id=${encodeURIComponent(wp.place_id)}` : ''}&travelmode=two-wheeler`}
+                                  target="_blank"
                                   rel="noopener noreferrer"
                                   className="nav-link-btn"
                                   title="Navigasi ke lokasi ini"

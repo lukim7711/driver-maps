@@ -161,21 +161,102 @@
 /* Selected File Thumbnails */
 .file-previews {
   display: flex;
+  flex-direction: column;
   gap: 8px;
-  flex-wrap: wrap;
   margin-top: 12px;
 }
 
-.preview-chip {
+.preview-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  padding: 4px 10px;
-  border-radius: 100px;
-  font-size: 11px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  transition: border-color 0.2s;
+}
+
+.preview-card:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.preview-thumbnail-wrapper {
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: rgba(15, 23, 42, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.preview-thumbnail {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.preview-thumbnail-placeholder {
+  color: #64748b;
+}
+
+.preview-info {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.preview-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.preview-meta {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #cbd5e1;
+  flex-wrap: wrap;
+}
+
+.preview-size {
+  font-size: 10px;
+  color: #94a3b8;
+}
+
+.preview-size-delta {
+  font-size: 10px;
+  color: #64748b;
+}
+
+.compression-badge {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.compression-badge.compressed {
+  background: rgba(16, 185, 129, 0.1);
+  color: #34d399;
+}
+
+.compression-badge.skipped {
+  background: rgba(148, 163, 184, 0.1);
+  color: #94a3b8;
 }
 
 .remove-file-btn {
@@ -183,13 +264,24 @@
   border: none;
   color: #ef4444;
   cursor: pointer;
-  padding: 0;
+  padding: 4px;
   display: flex;
   align-items: center;
+  border-radius: 6px;
+  transition: background 0.2s;
 }
 
 .remove-file-btn:hover {
   color: #f87171;
+  background: rgba(239, 68, 68, 0.08);
+}
+
+/* Drag & Drop States */
+.upload-zone.dragover {
+  border-color: #00f2fe;
+  background: rgba(0, 242, 254, 0.05);
+  box-shadow: 0 0 20px rgba(0, 242, 254, 0.15);
+  transform: scale(1.02);
 }
 
 /* Driver Location Inputs */

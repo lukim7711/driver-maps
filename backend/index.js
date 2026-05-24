@@ -5,7 +5,7 @@ const multer = require('multer');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
 const { extractAddressesFromImages } = require('./services/agent');
-const { geocodeAddress, searchPlaceText, validateAddressOffice, optimizeSmartRoute, computePolylineRoute, generateNavigationLink } = require('./services/maps');
+const { geocodeAddress, searchPlaceText, optimizeSmartRoute, computePolylineRoute, generateNavigationLink } = require('./services/maps');
 const { normalizeQuery, getCachedAddress, saveAddressToCache } = require('./services/cache');
 
 require('dotenv').config({ path: path.join(__dirname, '.env') });
@@ -100,10 +100,6 @@ async function resolveCoordinatesForAPI(apiType, name, address) {
             result = await searchPlaceText(query);
             if (result) result = { lat: result.lat, lng: result.lng, formatted_address: result.formatted_address, place_id: result.place_id };
             else result = await geocodeAddress(query);
-        } else if (apiType === 'validation') {
-            result = await validateAddressOffice(query);
-            if (result) result = { lat: result.lat, lng: result.lng, formatted_address: result.formatted_address, place_id: result.place_id };
-            else result = await geocodeAddress(query);
         }
     } catch (err) {
         console.warn(`Error resolving coordinate for ${apiType}:`, err.message);
@@ -116,24 +112,61 @@ async function resolveCoordinatesForAPI(apiType, name, address) {
     return result;
 }
 
+/**
+ * Helper to run async tasks with limited concurrency.
+ */
+async function asyncPool(concurrency, items, fn) {
+    const results = [];
+    const executing = [];
+    for (const item of items) {
+        const p = Promise.resolve().then(() => fn(item));
+        results.push(p);
+        if (items.length >= concurrency) {
+            const e = p.then(() => executing.splice(executing.indexOf(e), 1));
+            executing.push(e);
+            if (executing.length >= concurrency) {
+                await Promise.race(executing);
+            }
+        }
+    }
+    return Promise.all(results);
+}
+
 async function calculateRouteForAPI(apiType, dataList, startLocation) {
     const validOrders = [];
+    const failedOrders = [];
 
-    for (const data of dataList) {
-        if (data && data.pickup && data.delivery) {
-            const orderData = { ...data };
-            const pickupCoords = await resolveCoordinatesForAPI(apiType, orderData.pickup.name, orderData.pickup.address);
-            const deliveryCoords = await resolveCoordinatesForAPI(apiType, orderData.delivery.name, orderData.delivery.address);
+    await asyncPool(3, dataList, async (data) => {
+        if (!data || !data.pickup || !data.delivery) return;
+        const orderData = { ...data };
+        try {
+            const [pickupCoords, deliveryCoords] = await Promise.all([
+                resolveCoordinatesForAPI(apiType, orderData.pickup.name, orderData.pickup.address),
+                resolveCoordinatesForAPI(apiType, orderData.delivery.name, orderData.delivery.address)
+            ]);
 
             if (pickupCoords && deliveryCoords) {
                 orderData.pickup = { ...orderData.pickup, coordinates: pickupCoords };
                 orderData.delivery = { ...orderData.delivery, coordinates: deliveryCoords };
                 validOrders.push(orderData);
+            } else {
+                failedOrders.push({
+                    name: orderData.pickup?.name || 'Unknown',
+                    address: orderData.pickup?.address || '',
+                    reason: 'Gagal mendapatkan koordinat alamat.'
+                });
             }
+        } catch (err) {
+            console.warn(`Error processing order for ${apiType}:`, err.message);
+            failedOrders.push({
+                name: orderData.pickup?.name || 'Unknown',
+                address: orderData.pickup?.address || '',
+                reason: 'Error saat geocoding.'
+            });
         }
-    }
+    });
 
-    if (validOrders.length === 0) return null;
+    if (validOrders.length === 0) return { failed_orders: failedOrders };
 
     let optimizedPoints = [];
     if (startLocation) {
@@ -169,7 +202,8 @@ async function calculateRouteForAPI(apiType, dataList, startLocation) {
     return {
         optimized_waypoints: optimizedPoints,
         route_details: routeDetails,
-        navigation_link: navigationLink
+        navigation_link: navigationLink,
+        failed_orders: failedOrders
     };
 }
 
@@ -213,13 +247,29 @@ app.post('/api/extract-address', extractLimiter, upload.array('screenshots', MAX
             calculateRouteForAPI('places', dataList, startLocation)
         ]);
 
+        // Merge failed orders from both APIs and deduplicate
+        const allFailed = [];
+        const seenFailed = new Set();
+        for (const route of [geocodingRoute, placesRoute]) {
+            if (route && Array.isArray(route.failed_orders)) {
+                for (const fo of route.failed_orders) {
+                    const key = `${fo.name}|${fo.address}`;
+                    if (!seenFailed.has(key)) {
+                        seenFailed.add(key);
+                        allFailed.push(fo);
+                    }
+                }
+            }
+        }
+
         res.status(200).send({
             success: true,
             data: dataList,
             routes: {
                 geocoding: geocodingRoute,
                 places: placesRoute
-            }
+            },
+            failed_orders: allFailed.length > 0 ? allFailed : undefined
         });
     } catch (error) {
         console.error('Error extracting address:', error);
