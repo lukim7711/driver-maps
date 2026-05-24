@@ -1,0 +1,7 @@
+node_modules/
+.env
+sa-key.json
+server.log
+.git
+.gitignore
+.gcloudignore
