@@ -59,15 +59,15 @@ export default function App() {
       });
 
       const compressedTotal = [...files, ...results.map(r => r.file)].reduce((s, f) => s + f.size, 0);
-      return { results, compressedTotal };
+      return { results, compressedTotal, originalTotal };
     } catch (err) {
       console.error('Compression batch error:', err);
+      const results = incomingFiles.map(f => ({ file: f, originalSize: f.size, compressedSize: f.size, skipped: true }));
       const compressedTotal = [...files, ...incomingFiles].reduce((s, f) => s + f.size, 0);
-      return { results: incomingFiles.map(f => ({ file: f, originalSize: f.size, compressedSize: f.size, skipped: true })), compressedTotal };
+      return { results, compressedTotal, originalTotal };
     }
   };
 
-  // File Upload Handlers
   const handleFileChange = async (e) => {
     if (e.target.files) {
       const selectedFiles = Array.from(e.target.files);
@@ -78,14 +78,14 @@ export default function App() {
       }
       const incomingFiles = selectedFiles.slice(0, totalAllowed);
 
-      const { results, compressedTotal } = await handleCompress(incomingFiles);
+      const { results, compressedTotal, originalTotal } = await handleCompress(incomingFiles);
       const compressedFiles = results.map(r => r.file);
       const allFiles = [...files, ...compressedFiles];
 
       setFiles(allFiles);
       setCompressionStatus({
         isCompressing: false,
-        originalSize: compressionStatus.originalSize,
+        originalSize: originalTotal,
         compressedSize: compressedTotal,
         completed: results.length,
         total: incomingFiles.length
