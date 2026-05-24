@@ -30,3 +30,6 @@ Thumbs.db
 
 # Other
 backend.tar.gz
+
+# OpenCode personal config (contains API keys)
+opencode.json

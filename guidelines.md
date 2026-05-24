@@ -48,11 +48,22 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 ```
 
+Pastikan juga ada berkas `backend/.dockerignore` yang mengecualikan `.env`, `node_modules`, dan berkas development lainnya agar tidak masuk ke Docker image.
+
 ---
 
 ## **4. Langkah Deploy ke Google Cloud Run**
 
-### **Langkah 4.1: Eksekusi Perintah Deploy**
+### **Langkah 4.1: Set API Key (sekali saja)**
+Google Maps API Key harus disimpan sebagai environment variable di Cloud Run, bukan di file di repo. Set cukup satu kali:
+
+```bash
+gcloud run services update ojol-router \
+  --region asia-southeast1 \
+  --update-env-vars=GOOGLE_MAPS_API_KEY=<KUNCI_API_ANDA>
+```
+
+### **Langkah 4.2: Eksekusi Perintah Deploy**
 Gunakan Cloud Run Source Deploy untuk memaketkan folder `backend` secara langsung tanpa perlu membuat berkas Docker image manual di Artifact Registry. Jalankan perintah ini dari direktori root project:
 
 ```bash
@@ -60,13 +71,13 @@ gcloud run deploy ojol-router \
   --source backend \
   --region asia-southeast1 \
   --allow-unauthenticated \
-  --set-env-vars="PORT=80,PROJECT_ID=ojol-cuanbot-router,LOCATION=global,GOOGLE_CLOUD_PROJECT=ojol-cuanbot-router,GOOGLE_CLOUD_LOCATION=global,GOOGLE_GENAI_USE_VERTEXAI=true,GOOGLE_MAPS_API_KEY=<KUNCI_API_GOOGLE_MAPS_ANDA>"
+  --update-env-vars="PROJECT_ID=ojol-cuanbot-router,LOCATION=global,GOOGLE_CLOUD_PROJECT=ojol-cuanbot-router,GOOGLE_CLOUD_LOCATION=global,GOOGLE_GENAI_USE_VERTEXAI=true"
 ```
 
 > **Catatan Variabel Lingkungan:**
-> - `PORT=80` (Atau biarkan default `8080` sesuai konfigurasi Cloud Run).
+> - `PORT` tidak perlu diset — Cloud Run otomatis menyediakan `PORT=8080`, dan kode backend sudah menggunakan `process.env.PORT || 8080`.
 > - `GOOGLE_GENAI_USE_VERTEXAI=true` memaksa SDK AI menggunakan Vertex AI GCP.
-> - Masukkan kunci Maps API Anda pada `GOOGLE_MAPS_API_KEY`.
+> - `GOOGLE_MAPS_API_KEY` tidak disertakan di perintah deploy — sudah diset terpisah di Langkah 4.1 dan tidak akan ditimpa karena menggunakan `--update-env-vars` (bukan `--set-env-vars`).
 
 ---
 
