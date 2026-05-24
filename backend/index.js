@@ -11,6 +11,7 @@ const { normalizeQuery, getCachedAddress, saveAddressToCache } = require('./serv
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const app = express();
+app.set('trust proxy', true);
 const port = process.env.PORT || 8080;
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
@@ -63,7 +64,8 @@ const extractLimiter = rateLimit({
     max: 10,
     message: { error: 'Terlalu banyak permintaan, coba lagi nanti.' },
     standardHeaders: true,
-    legacyHeaders: false
+    legacyHeaders: false,
+    validate: false
 });
 
 function validateGeoCoordinate(value, label) {
