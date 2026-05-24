@@ -6,6 +6,7 @@ const path = require('path');
 const rateLimit = require('express-rate-limit');
 const { extractAddressesFromImages } = require('./services/agent');
 const { geocodeAddress, searchPlaceText, validateAddressOffice, optimizeSmartRoute, computePolylineRoute, generateNavigationLink } = require('./services/maps');
+const { normalizeQuery, getCachedAddress, saveAddressToCache } = require('./services/cache');
 
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
@@ -81,23 +82,36 @@ function validateGeoCoordinate(value, label) {
 
 async function resolveCoordinatesForAPI(apiType, name, address) {
     const query = `${name}, ${address}`;
+    const normalized = normalizeQuery(query);
 
+    const cached = await getCachedAddress(normalized, apiType);
+    if (cached) {
+        console.log(`Cache HIT for ${apiType}: ${query.substring(0, 40)}...`);
+        return cached;
+    }
+
+    let result = null;
     try {
         if (apiType === 'geocoding') {
-            return await geocodeAddress(query);
+            result = await geocodeAddress(query);
         } else if (apiType === 'places') {
-            const res = await searchPlaceText(query);
-            if (res) return { lat: res.lat, lng: res.lng, formatted_address: res.formatted_address, place_id: res.place_id };
-            return await geocodeAddress(query);
+            result = await searchPlaceText(query);
+            if (result) result = { lat: result.lat, lng: result.lng, formatted_address: result.formatted_address, place_id: result.place_id };
+            else result = await geocodeAddress(query);
         } else if (apiType === 'validation') {
-            const res = await validateAddressOffice(query);
-            if (res) return { lat: res.lat, lng: res.lng, formatted_address: res.formatted_address, place_id: res.place_id };
-            return await geocodeAddress(query);
+            result = await validateAddressOffice(query);
+            if (result) result = { lat: result.lat, lng: result.lng, formatted_address: result.formatted_address, place_id: result.place_id };
+            else result = await geocodeAddress(query);
         }
     } catch (err) {
         console.warn(`Error resolving coordinate for ${apiType}:`, err.message);
     }
-    return null;
+
+    if (result) {
+        await saveAddressToCache(normalized, apiType, result);
+    }
+
+    return result;
 }
 
 async function calculateRouteForAPI(apiType, dataList, startLocation) {
