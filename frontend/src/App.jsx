@@ -7,9 +7,11 @@ import {
   Trash2, 
   TrendingUp, 
   AlertCircle, 
-  HelpCircle 
+  HelpCircle,
+  Zap
 } from 'lucide-react';
 import MapComponent from './components/MapComponent';
+import { compressImages } from './utils/imageCompress';
 import './App.css';
 
 export default function App() {
@@ -33,13 +35,61 @@ export default function App() {
     places: true
   });
 
+  const [compressionStatus, setCompressionStatus] = useState({
+    isCompressing: false,
+    originalSize: 0,
+    compressedSize: 0,
+    completed: 0,
+    total: 0
+  });
+
+  const handleCompress = async (incomingFiles) => {
+    const originalTotal = files.reduce((s, f) => s + f.size, 0) + incomingFiles.reduce((s, f) => s + f.size, 0);
+    setCompressionStatus({
+      isCompressing: true,
+      originalSize: originalTotal,
+      compressedSize: 0,
+      completed: 0,
+      total: incomingFiles.length
+    });
+
+    try {
+      const results = await compressImages(incomingFiles, (completed, total) => {
+        setCompressionStatus(prev => ({ ...prev, completed, total }));
+      });
+
+      const compressedTotal = [...files, ...results.map(r => r.file)].reduce((s, f) => s + f.size, 0);
+      return { results, compressedTotal };
+    } catch (err) {
+      console.error('Compression batch error:', err);
+      const compressedTotal = [...files, ...incomingFiles].reduce((s, f) => s + f.size, 0);
+      return { results: incomingFiles.map(f => ({ file: f, originalSize: f.size, compressedSize: f.size, skipped: true })), compressedTotal };
+    }
+  };
+
   // File Upload Handlers
-  const handleFileChange = (e) => {
+  const handleFileChange = async (e) => {
     if (e.target.files) {
       const selectedFiles = Array.from(e.target.files);
-      // Limit to max 5 screenshots
-      const totalFiles = [...files, ...selectedFiles].slice(0, 5);
-      setFiles(totalFiles);
+      const totalAllowed = 5 - files.length;
+      if (totalAllowed <= 0) {
+        setError('Maksimal 5 gambar. Hapus file yang ada untuk menambah baru.');
+        return;
+      }
+      const incomingFiles = selectedFiles.slice(0, totalAllowed);
+
+      const { results, compressedTotal } = await handleCompress(incomingFiles);
+      const compressedFiles = results.map(r => r.file);
+      const allFiles = [...files, ...compressedFiles];
+
+      setFiles(allFiles);
+      setCompressionStatus({
+        isCompressing: false,
+        originalSize: compressionStatus.originalSize,
+        compressedSize: compressedTotal,
+        completed: results.length,
+        total: incomingFiles.length
+      });
       setError(null);
     }
   };
@@ -142,6 +192,13 @@ export default function App() {
     return `${(meters / 1000).toFixed(1)} km`;
   };
 
+  const formatFileSize = (bytes) => {
+    if (!bytes) return '0 KB';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  };
+
   const currentRouteAPI = selectedRouteAPI;
   const currentRoute = routesData ? routesData[currentRouteAPI] : null;
   const currentWaypoints = currentRoute ? currentRoute.optimized_waypoints : waypoints;
@@ -179,14 +236,54 @@ export default function App() {
                   <span className="upload-subtext">Maksimal 5 file screenshot detail pesanan</span>
                 </label>
 
+                {compressionStatus.isCompressing && (
+                  <div style={{
+                    padding: '10px 12px',
+                    background: 'rgba(59, 130, 246, 0.1)',
+                    border: '1px solid rgba(59, 130, 246, 0.2)',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    fontSize: '11px',
+                    color: '#93c5fd'
+                  }}>
+                    <div className="loader-spinner" style={{ width: '16px', height: '16px', borderWidth: '3px', borderColor: 'rgba(59,130,246,0.2)', borderTopColor: '#3b82f6' }}></div>
+                    <span>Mengompresi gambar... ({compressionStatus.completed}/{compressionStatus.total})</span>
+                  </div>
+                )}
+
+                {!compressionStatus.isCompressing && compressionStatus.compressedSize > 0 && compressionStatus.originalSize > compressionStatus.compressedSize && (
+                  <div style={{
+                    padding: '10px 12px',
+                    background: 'rgba(34, 197, 94, 0.08)',
+                    border: '1px solid rgba(34, 197, 94, 0.15)',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}>
+                    <Zap size={14} color="#22c55e" />
+                    <span style={{ fontSize: '11px', color: '#86efac', lineHeight: '1.4' }}>
+                      <strong>Hemat kuota {Math.round((1 - compressionStatus.compressedSize / compressionStatus.originalSize) * 100)}%</strong><br/>
+                      <span style={{ opacity: 0.7 }}>
+                        {formatFileSize(compressionStatus.originalSize)} → {formatFileSize(compressionStatus.compressedSize)}
+                      </span>
+                    </span>
+                  </div>
+                )}
+
                 {/* List of chosen files */}
                 {files.length > 0 && (
                   <div className="file-previews">
                     {files.map((file, idx) => (
                       <div key={idx} className="preview-chip">
                         <FileImage size={12} />
-                        <span style={{ maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <span className="file-chip-name" style={{ maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {file.name}
+                        </span>
+                        <span style={{ fontSize: '9px', color: '#64748b', marginLeft: 'auto', flexShrink: 0 }}>
+                          {formatFileSize(file.size)}
                         </span>
                         <button type="button" onClick={() => handleRemoveFile(idx)} className="remove-file-btn">
                           <Trash2 size={12} />
