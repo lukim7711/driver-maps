@@ -60,7 +60,7 @@ gcloud run deploy ojol-router \
   --source backend \
   --region asia-southeast1 \
   --allow-unauthenticated \
-  --set-env-vars="PORT=80,PROJECT_ID=ojol-cuanbot-router,LOCATION=global,GOOGLE_CLOUD_PROJECT=ojol-cuanbot-router,GOOGLE_CLOUD_LOCATION=global,GOOGLE_GENAI_USE_VERTEXAI=true,GOOGLE_MAPS_API_KEY=AIzaSyD6bOBazehJC4-FCwJIzrkIq8SHyXPMLFY"
+  --set-env-vars="PORT=80,PROJECT_ID=ojol-cuanbot-router,LOCATION=global,GOOGLE_CLOUD_PROJECT=ojol-cuanbot-router,GOOGLE_CLOUD_LOCATION=global,GOOGLE_GENAI_USE_VERTEXAI=true,GOOGLE_MAPS_API_KEY=<KUNCI_API_GOOGLE_MAPS_ANDA>"
 ```
 
 > **Catatan Variabel Lingkungan:**
