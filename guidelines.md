@@ -119,5 +119,7 @@ curl -i https://<URL-LAYANAN-CLOUD-RUN-ANDA>/health
 ---
 
 ## **7. Catatan Penting Lainnya bagi AI / Developer**
-- **TSP Router Solver:** Pemecah rute pintar berada pada `backend/services/maps.js` (`optimizeSmartRoute`) secara lokal menggunakan brute force permutasi dengan batasan pickup-before-delivery. Jangan ubah jika jumlah titik masih skala kecil (max 5 struk).
-- **Google Maps Redirection:** Pengalihan navigasi eksternal wajib menggunakan koordinat GPS mentah (`lat,lng`) sebagai parameter kueri utama untuk mencegah kegagalan geocoding di aplikasi mobile Google Maps, dengan `place_id` sebagai parameter pelengkap.
+- **TSP Router Solver:** Pemecah rute pintar berada pada `backend/services/maps.js` (`optimizeSmartRoute`) secara lokal menggunakan brute force permutasi dengan batasan pickup-before-delivery untuk ≤3 struk (maks. 720 permutasi). Untuk jumlah struk lebih besar, otomatis beralih ke algoritma greedy nearest-neighbor untuk mencegah blocking event loop. Jarak Haversine digunakan sebagai fallback kalau Route Matrix API gagal.
+- **Throttling Geocoding:** Proses geocoding per order dibatasi maksimal 3 order paralel per API type via `asyncPool` di `backend/index.js`, agar tidak membakar Google API quota terlalu cepat. Pickup dan delivery dalam 1 order tetap diproses paralel via `Promise.all`.
+- **Tracking Order Gagal:** `calculateRouteForAPI` mencatat order yang gagal geocoding dalam array `failed_orders` dan dikembalikan ke frontend. UI menampilkan toast error Bahasa Indonesia menyebutkan nama seller yang gagal.
+- **Google Maps Redirection:** Pengalihan navigasi eksternal wajib menggunakan koordinat GPS mentah (`lat,lng`) sebagai parameter kueri utama untuk mencegah kegagalan geocoding di aplikasi mobile Google Maps, dengan `place_id` sebagai parameter pelengkap (kalau tersedia) untuk meningkatkan akurasi lokasi.

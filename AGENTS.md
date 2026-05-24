@@ -50,10 +50,16 @@ LOCATION=us-central1
 - **No test suite** — `backend/package.json` has a placeholder script; `test.js` is a CLI integration script, not a test runner.
 - **Linting only on frontend** via ESLint flat config. Backend has no linter, formatter, or typecheck configured.
 - **Two parallel geocoding strategies** — the `/api/extract-address` endpoint always resolves addresses via both Geocoding API and Places API (New), returns both results for comparison in the frontend.
-- **TSP solver is brute-force** (`maps.js:optimizeSmartRoute`) — generates all permutations with a pickup-before-delivery constraint. Works for small N (max 5 screenshots per upload). Falls back to Haversine distance if Route Matrix API fails.
-- **Gemini model is hardcoded** — `backend/services/agent.js` uses `gemini-3.1-flash-lite` as a string literal.
-- **Routes API V2 quirks** — `routingPreference` switches dynamically: `TRAFFIC_AWARE_OPTIMAL` when `points² <= 100`, otherwise `TRAFFIC_AWARE`. Also sets `avoidTolls: true` and `avoidHighways: true` (motorcycle safety).
+- **Geocoding calls are throttled** — `asyncPool(3, ...)` limits max 3 concurrent order-processing tasks per API type. Pickup & delivery within the same order are resolved in parallel via `Promise.all`.
+- **TSP solver is hybrid** (`maps.js:optimizeSmartRoute`) — brute-force permutations for ≤3 orders (6 points + driver = 7 points, 720 permutations). For >3 orders, falls back to a greedy nearest-neighbor heuristic with pickup-before-delivery constraints to prevent event-loop blocking. Also falls back to Haversine distance matrix if Route Matrix API fails.
+- **Failed order tracking** — `calculateRouteForAPI` tracks orders that fail geocoding and returns `failed_orders` array in the API response. The frontend displays a Bahasa Indonesia error toast naming the failed sellers.
+- **Gemini model is env-configurable** — `backend/services/agent.js` uses `process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite'`. Previously hardcoded but now overridable.
+- **Routes API V2 quirks** — `routingPreference` switches dynamically: `TRAFFIC_AWARE_OPTIMAL` when `points² <= 100`, otherwise `TRAFFIC_AWARE`. Also sets `avoidTolls: true` and `avoidHighways: true` (motorcycle safety). `computeRouteMatrix` response defensively parsed for NDJSON (newline-delimited JSON) strings.
+- **Frontend duration parsing** — `formatDuration` in `App.jsx` handles Routes API V2 `duration` objects (`{seconds, nanos}`), not just strings/numbers.
+- **Per-step navigation uses `place_id`** — Google Maps deep links for individual waypoints include `destination_place_id` when available, reducing mobile geocoding failures.
+- **Cache updates are awaited** — `backend/services/cache.js` now `await`s the Firestore `hit_count` increment with `try/catch` instead of fire-and-forget.
 - **Backend serves pre-built frontend** — `backend/public/` contains compiled Vite output. Express serves these statically and has an SPA fallback for non-API GET requests.
+- **UI upload improvements** — thumbnail previews (48×48), drag & drop with visual feedback, and per-file compression status badges (`Dikompresi` / `Dilewati`) with before/after size deltas.
 
 ## Language conventions
 
