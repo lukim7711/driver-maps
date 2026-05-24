@@ -1,5 +1,6 @@
 const axios = require('axios');
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
@@ -31,7 +32,8 @@ async function geocodeAddress(address) {
             return {
                 lat: location.lat,
                 lng: location.lng,
-                formatted_address: response.data.results[0].formatted_address
+                formatted_address: response.data.results[0].formatted_address,
+                place_id: response.data.results[0].place_id
             };
         } else {
             console.warn(`Geocoding failed for address: ${address}. Status: ${response.data.status}`);
@@ -266,6 +268,7 @@ async function optimizeSmartRoute(startLocation, orders) {
                     name: order.pickup.name,
                     address: order.pickup.address,
                     coordinates: order.pickup.coordinates,
+                    place_id: order.pickup.coordinates?.place_id,
                     order_index: orderIdx
                 };
             } else {
@@ -274,6 +277,7 @@ async function optimizeSmartRoute(startLocation, orders) {
                     name: order.delivery.name,
                     address: order.delivery.address,
                     coordinates: order.delivery.coordinates,
+                    place_id: order.delivery.coordinates?.place_id,
                     order_index: orderIdx
                 };
             }
@@ -299,6 +303,7 @@ async function optimizeSmartRoute(startLocation, orders) {
                 name: order.pickup.name,
                 address: order.pickup.address,
                 coordinates: order.pickup.coordinates,
+                place_id: order.pickup.coordinates?.place_id,
                 order_index: orderIdx
             };
         } else {
@@ -307,6 +312,7 @@ async function optimizeSmartRoute(startLocation, orders) {
                 name: order.delivery.name,
                 address: order.delivery.address,
                 coordinates: order.delivery.coordinates,
+                place_id: order.delivery.coordinates?.place_id,
                 order_index: orderIdx
             };
         }
@@ -319,20 +325,45 @@ async function optimizeSmartRoute(startLocation, orders) {
 function generateNavigationLink(points) {
     if (!points || points.length < 2) return null;
     
-    const origin = points[0];
-    const destination = points[points.length - 1];
+    // Helper to get coordinates string from a waypoint or raw coordinate
+    const getLatLngStr = (p) => {
+        if (p.coordinates) {
+            return `${p.coordinates.lat},${p.coordinates.lng}`;
+        }
+        return `${p.lat},${p.lng}`;
+    };
     
-    const originStr = `${origin.lat},${origin.lng}`;
-    const destStr = `${destination.lat},${destination.lng}`;
+    const startPoint = points[0];
+    const endPoint = points[points.length - 1];
+    
+    // Origin: Driver's location
+    const originStr = getLatLngStr(startPoint);
+    
+    // Destination: use raw coordinates as primary query to guarantee resolution
+    const destStr = getLatLngStr(endPoint);
+    let destPlaceIdStr = '';
+    
+    if (endPoint.place_id) {
+        destPlaceIdStr = `&destination_place_id=${endPoint.place_id}`;
+    }
     
     const waypoints = points.slice(1, -1);
     let waypointsStr = '';
+    let waypointsPlaceIdsStr = '';
     
     if (waypoints.length > 0) {
-        waypointsStr = '&waypoints=' + waypoints.map(wp => `${wp.lat},${wp.lng}`).join('|');
+        // Use coordinates for waypoints as primary query to guarantee resolution
+        const waypointParts = waypoints.map(wp => getLatLngStr(wp));
+        waypointsStr = '&waypoints=' + waypointParts.join('%7C');
+        
+        // Add waypoints place IDs
+        const placeIds = waypoints.map(wp => wp.place_id || '');
+        if (placeIds.some(id => id !== '')) {
+            waypointsPlaceIdsStr = '&waypoints_place_ids=' + placeIds.join('%7C');
+        }
     }
 
-    return `https://www.google.com/maps/dir/?api=1&origin=${originStr}&destination=${destStr}${waypointsStr}&travelmode=two-wheeler`;
+    return `https://www.google.com/maps/dir/?api=1&origin=${originStr}&destination=${destStr}${destPlaceIdStr}${waypointsStr}${waypointsPlaceIdsStr}&travelmode=two-wheeler`;
 }
 
 /**
@@ -407,7 +438,7 @@ async function searchPlaceText(query) {
             headers: {
                 'Content-Type': 'application/json',
                 'X-Goog-Api-Key': apiKey,
-                'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location'
+                'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location'
             }
         });
 
@@ -417,7 +448,8 @@ async function searchPlaceText(query) {
                 lat: place.location.latitude,
                 lng: place.location.longitude,
                 display_name: place.displayName?.text || query,
-                formatted_address: place.formattedAddress
+                formatted_address: place.formattedAddress,
+                place_id: place.id
             };
         }
         return null;
@@ -464,7 +496,8 @@ async function validateAddressOffice(addressText) {
                     formatted_address: result.address?.formattedAddress || addressText,
                     granularity: verdict.geocodeGranularity || 'UNKNOWN',
                     validation_status: verdict.addressComplete ? 'CONFIRMED' : 'UNCONFIRMED',
-                    has_unresolved: verdict.hasUnresolvedParts || false
+                    has_unresolved: verdict.hasUnresolvedParts || false,
+                    place_id: geocode.placeId
                 };
             }
         }

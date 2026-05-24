@@ -33,7 +33,6 @@ export default function MapComponent({ waypoints, encodedPolyline, routesData, v
                         <span class="marker-icon">${iconHTML}</span>
                         ${badgeHTML}
                     </div>
-                    <div class="marker-tooltip">${label}</div>
                 </div>
             `,
             iconSize: [36, 46],
@@ -52,7 +51,6 @@ export default function MapComponent({ waypoints, encodedPolyline, routesData, v
                         <div class="marker-pin marker-driver">
                             <span class="marker-icon">🚗</span>
                         </div>
-                        <div class="marker-tooltip">${label}</div>
                     </div>
                 `,
                 iconSize: [36, 46],
@@ -86,7 +84,6 @@ export default function MapComponent({ waypoints, encodedPolyline, routesData, v
                         <span class="marker-icon">${iconHTML}</span>
                         ${badgeHTML}
                     </div>
-                    <div class="marker-tooltip">${label}</div>
                 </div>
             `,
             iconSize: [36, 46],

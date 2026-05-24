@@ -1,5 +1,13 @@
 const { GoogleGenAI } = require('@google/genai');
-require('dotenv').config();
+const path = require('path');
+const dotenvResult = require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+console.log('AGENT_JS_INIT: dotenvResult =', dotenvResult);
+console.log('AGENT_JS_INIT: env =', {
+    PROJECT_ID: process.env.PROJECT_ID,
+    GOOGLE_CLOUD_PROJECT: process.env.GOOGLE_CLOUD_PROJECT,
+    LOCATION: process.env.LOCATION,
+    GOOGLE_CLOUD_LOCATION: process.env.GOOGLE_CLOUD_LOCATION
+});
 
 // Configuration
 const projectId = process.env.PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;

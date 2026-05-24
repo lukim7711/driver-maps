@@ -146,7 +146,21 @@ Mengunggah screenshot pesanan kurir secara massal dan mengembalikan koordinat se
 
 ---
 
-## **6. Cara Memulai & Menjalankan Lokal**
+## **6. Catatan Teknis & Optimasi Mobile (Technical Notes & Mobile Optimizations)**
+
+Selama pengembangan dan pengujian di perangkat mobile, beberapa penyesuaian arsitektur penting dilakukan untuk menjaga kestabilan dan kinerja aplikasi:
+
+### **6.1. Optimasi Peta Web Leaflet (Kinerja Mobile)**
+* **Masalah:** Penayangan label teks kustom (tooltip) melayang secara permanen di atas pin peta Leaflet menyebabkan beban rendering (paint/layout overhead) yang sangat tinggi di peramban web mobile, mengakibatkan animasi terputus-putus (*lag*).
+* **Solusi:** Label teks permanen dihilangkan dari DOM pohon komponen [MapComponent.jsx](file:///home/bod/Development/driver-maps/frontend/src/components/MapComponent.jsx). Sebagai gantinya, peta menampilkan penanda nomor pin sederhana (P1, D1, dst.), dan rincian lengkap lokasi (nama & alamat) dapat diakses secara dinamis (*on-demand*) melalui balon popup bawaan Leaflet saat driver mengetuk/klik pin tersebut.
+
+### **6.2. Strategi Pengalihan Google Maps yang Tangguh (Robust Redirection)**
+* **Masalah:** Aplikasi Google Maps Mobile akan membatalkan rangkaian rute multi-stop jika salah satu parameter pemberhentian berupa string pencarian kustom (misalnya mengandung teks `[Pickup #1]`) gagal diselesaikan oleh mesin pencari Google Maps. Hal ini menyebabkan rute terpotong hanya menampilkan rute driver ke tujuan pertama saja.
+* **Solusi:** URL navigasi diubah dengan **koordinat lintang/bujur mentah (`lat,lng`)** sebagai parameter pencarian utama (`destination` dan `waypoints`). Karena koordinat mentah 100% selalu valid dan dapat dipetakan langsung oleh aplikasi Google Maps, rute tidak akan pernah terputus. Parameter `place_id` dikirimkan sebagai parameter sekunder opsional agar aplikasi Google Maps menampilkan nama resmi tempat/bisnis pada daftar pemberhentian (*itinerary sheet*) jika terdaftar di database mereka.
+
+---
+
+## **7. Cara Memulai & Menjalankan Lokal**
 
 ### **Langkah 1: Setup Kredensial & Environment**
 

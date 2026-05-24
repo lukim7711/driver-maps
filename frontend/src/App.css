@@ -605,30 +605,32 @@
   box-shadow: 0 4px 12px rgba(168, 85, 247, 0.5);
 }
 
-/* Tooltip on hover */
+/* Tooltip/Labels permanently visible */
 .marker-tooltip {
   position: absolute;
-  bottom: 50px;
-  background: rgba(15, 23, 42, 0.95);
-  backdrop-filter: blur(4px);
+  bottom: 42px;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(8px);
   border: 1px solid rgba(255, 255, 255, 0.1);
   color: #ffffff;
-  padding: 4px 8px;
-  border-radius: 6px;
-  font-size: 10px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-size: 9px;
   font-weight: 600;
   white-space: nowrap;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
   pointer-events: none;
-  opacity: 0;
-  transform: translateY(5px);
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  opacity: 1;
+  transform: translateY(0);
+  transition: all 0.2s ease;
   z-index: 999;
 }
 
 .marker-container:hover .marker-tooltip {
-  opacity: 1;
-  transform: translateY(0);
+  background: rgba(59, 130, 246, 0.95);
+  border-color: rgba(59, 130, 246, 0.4);
+  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.3);
+  transform: scale(1.05);
 }
 
 /* Polyline Glowing Effects */

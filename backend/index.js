@@ -5,7 +5,7 @@ const path = require('path');
 const { extractAddressesFromImage } = require('./services/agent');
 const { geocodeAddress, generateNavigationLink } = require('./services/maps');
 
-require('dotenv').config();
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -33,11 +33,11 @@ async function resolveCoordinatesForAPI(apiType, name, address) {
             return await geocodeAddress(query);
         } else if (apiType === 'places') {
             const res = await searchPlaceText(query);
-            if (res) return { lat: res.lat, lng: res.lng, formatted_address: res.formatted_address };
+            if (res) return { lat: res.lat, lng: res.lng, formatted_address: res.formatted_address, place_id: res.place_id };
             return await geocodeAddress(query);
         } else if (apiType === 'validation') {
             const res = await validateAddressOffice(query);
-            if (res) return { lat: res.lat, lng: res.lng, formatted_address: res.formatted_address };
+            if (res) return { lat: res.lat, lng: res.lng, formatted_address: res.formatted_address, place_id: res.place_id };
             return await geocodeAddress(query);
         }
     } catch (err) {
@@ -94,7 +94,7 @@ async function calculateRouteForAPI(apiType, dataList, startLocation) {
     let navigationLink = null;
     if (optimizedPoints.length >= 2) {
         const rawCoordinates = optimizedPoints.map(wp => wp.coordinates);
-        navigationLink = generateNavigationLink(rawCoordinates);
+        navigationLink = generateNavigationLink(optimizedPoints);
         routeDetails = await computePolylineRoute(rawCoordinates);
     }
     
