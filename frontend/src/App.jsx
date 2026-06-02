@@ -72,7 +72,7 @@ export default function App() {
       for (const file of files) {
         const options = {
           maxSizeMB: 2,          // Kompres maksimal menjadi 2MB per gambar
-          maxWidthOrHeight: 1920, // Limit dimensi agar OCR masih bisa membaca dengan jelas
+          maxWidthOrHeight: 3000, // Limit dimensi ke 3000px agar teks tetap tajam
           useWebWorker: true,
         };
         const compressedFile = await imageCompression(file, options);

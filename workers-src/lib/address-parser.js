@@ -230,7 +230,10 @@ export function parseFreeformAddress(addressText) {
     const parts = cleaned.split(',').map(p => p.trim()).filter(Boolean);
 
     const provinceKeywords = ['Jakarta', 'Jawa Barat', 'Jawa Timur', 'Jawa Tengah', 'Banten', 'DKI Jakarta', 'DI Yogyakarta'];
-    const cityKeywords = ['Kota Jakarta', 'Kota Bandung', 'Kota Surabaya', 'Kabupaten', 'Kota'];
+    const cityKeywords = [
+        'Kota Jakarta', 'Jakarta Selatan', 'Jakarta Barat', 'Jakarta Pusat', 'Jakarta Timur', 'Jakarta Utara',
+        'Kota Bandung', 'Kota Surabaya', 'Kabupaten', 'Kota'
+    ];
 
     for (let i = parts.length - 1; i >= 0; i--) {
         const part = parts[i];

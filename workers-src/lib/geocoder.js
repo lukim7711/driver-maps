@@ -141,37 +141,73 @@ export async function smartGeocode({ address, name, type, apiKey }) {
     const cleanQuery = buildGeocodingQuery(structured);
     console.log(`[smartGeocode] ${type} | Clean query: ${cleanQuery}`);
 
-    // 1. Geocoding API (primary)
-    let result = null;
-    try {
-        result = await geocodeViaGeocodingAPI(cleanQuery, apiKey);
-        if (result && result.is_accurate) {
-            console.log(`[smartGeocode] ${type} | Geocoding API: AKURAT (${result.confidence.location_type})`);
-            return { ...result, name, type, original_address: address, clean_query: cleanQuery, structured };
-        } else if (result) {
-            console.warn(`[smartGeocode] ${type} | Geocoding API: location_type rendah (${result.confidence.location_type}), mencoba fallback...`);
-        }
-    } catch (e) {
-        console.warn(`[smartGeocode] ${type} | Geocoding API gagal:`, e.message);
-    }
+    const isPickup = type === 'pickup';
+    const hasName = name && name.length > 2;
+    const placesQuery = hasName ? `${name}, ${cleanQuery}` : cleanQuery;
 
-    // 2. Places API fallback
-    try {
-        const placeResult = await geocodeViaPlacesAPI(cleanQuery, apiKey);
-        if (placeResult) {
-            console.warn(`[smartGeocode] ${type} | Places API: digunakan sebagai fallback.`);
+    let result = null;
+
+    if (isPickup && hasName) {
+        // Prioritaskan Places API untuk lokasi pickup (toko/restoran)
+        console.log(`[smartGeocode] pickup | Prioritizing Places API with query: ${placesQuery}`);
+        try {
+            result = await geocodeViaPlacesAPI(placesQuery, apiKey);
             if (result) {
-                const geoScore = result.confidence?.location_type_score || 0;
-                const placeScore = placeResult.confidence?.location_type_score || 0;
-                if (placeScore > geoScore) {
-                    result = placeResult;
-                }
-            } else {
-                result = placeResult;
+                // Asumsikan hasil pencarian spesifik toko dengan Places API cukup akurat
+                result.is_accurate = true;
+                if (!result.confidence) result.confidence = {};
+                result.confidence.location_type_score = 4; // ROOFTOP equivalent
+                console.log(`[smartGeocode] pickup | Places API: AKURAT`);
+            }
+        } catch (e) {
+            console.warn(`[smartGeocode] pickup | Places API gagal:`, e.message);
+        }
+
+        if (!result) {
+            console.log(`[smartGeocode] pickup | Fallback ke Geocoding API...`);
+            try {
+                result = await geocodeViaGeocodingAPI(cleanQuery, apiKey);
+            } catch (e) {
+                console.warn(`[smartGeocode] pickup | Geocoding API gagal:`, e.message);
             }
         }
-    } catch (e) {
-        console.warn(`[smartGeocode] ${type} | Places API gagal:`, e.message);
+    } else {
+        // 1. Geocoding API (primary) untuk delivery / alamat rumah
+        try {
+            result = await geocodeViaGeocodingAPI(cleanQuery, apiKey);
+            if (result && result.is_accurate) {
+                console.log(`[smartGeocode] ${type} | Geocoding API: AKURAT (${result.confidence.location_type})`);
+            } else if (result) {
+                console.warn(`[smartGeocode] ${type} | Geocoding API: location_type rendah (${result.confidence.location_type}), mencoba fallback...`);
+            }
+        } catch (e) {
+            console.warn(`[smartGeocode] ${type} | Geocoding API gagal:`, e.message);
+        }
+
+        // 2. Places API fallback
+        if (!result || !result.is_accurate) {
+            try {
+                // Coba gunakan nama jika ada untuk fallback
+                const fallbackQuery = hasName && type === 'delivery' ? `${name}, ${cleanQuery}` : cleanQuery;
+                const placeResult = await geocodeViaPlacesAPI(fallbackQuery, apiKey);
+                if (placeResult) {
+                    console.warn(`[smartGeocode] ${type} | Places API: digunakan sebagai fallback.`);
+                    if (result) {
+                        const geoScore = result.confidence?.location_type_score || 0;
+                        const placeScore = placeResult.confidence?.location_type_score || 0;
+                        // Boost score for places api fallback if it finds an establishment
+                        const adjustedPlaceScore = placeResult.confidence.is_street_address ? 2 : 1;
+                        if (adjustedPlaceScore > geoScore) {
+                            result = placeResult;
+                        }
+                    } else {
+                        result = placeResult;
+                    }
+                }
+            } catch (e) {
+                console.warn(`[smartGeocode] ${type} | Places API gagal:`, e.message);
+            }
+        }
     }
 
     // 3. Return best result dengan warning jika kurang akurat
