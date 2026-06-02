@@ -65,6 +65,9 @@ jobs:
           cd frontend
           npm install
           npm run build
+          # Copy Pages Functions to dist
+          mkdir -p dist/functions
+          cp -r ../functions/* dist/functions/
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
