@@ -1,698 +1,248 @@
-import { useState, useEffect, useRef } from 'react';
-import {
-  Upload,
-  Navigation,
-  CheckCircle2,
-  FileImage,
-  Trash2,
-  TrendingUp,
-  AlertCircle,
-  HelpCircle,
-  Zap,
-  Image,
-  Check,
-  ArrowRight
-} from 'lucide-react';
-import MapComponent from './components/MapComponent';
-import { compressImages } from './utils/imageCompress';
+import { useState, useRef } from 'react';
+import { Upload, FileImage, Trash2, AlertCircle, MapPin, CheckCircle, AlertTriangle, XCircle } from 'lucide-react';
 import './App.css';
 
 export default function App() {
   const [files, setFiles] = useState([]);
-  const [driverLat, setDriverLat] = useState('-6.160000');
-  const [driverLng, setDriverLng] = useState('106.750000');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-
-  // Response data states
-  const [waypoints, setWaypoints] = useState([]);
-  const [routeDetails, setRouteDetails] = useState(null);
-  const [navigationLink, setNavigationLink] = useState(null);
-  const [completedSteps, setCompletedSteps] = useState({});
-
-  // Route comparison states
-  const [routesData, setRoutesData] = useState(null);
-  const [selectedRouteAPI, setSelectedRouteAPI] = useState('places');
-  const [visibilityFlags, setVisibilityFlags] = useState({
-    geocoding: true,
-    places: true
-  });
-
-  const [compressionStatus, setCompressionStatus] = useState({
-    isCompressing: false,
-    originalSize: 0,
-    compressedSize: 0,
-    completed: 0,
-    total: 0
-  });
-
-  // Track per-file preview URLs and compression states
-  const [filePreviews, setFilePreviews] = useState({});
-  const [fileCompressionStates, setFileCompressionStates] = useState({});
+  const [results, setResults] = useState(null);
   const [dragOver, setDragOver] = useState(false);
 
-  // Ref to access latest files in async callbacks without stale closure
-  const filesRef = useRef(files);
+  const fileInputRef = useRef(null);
 
-  // Compression runs in useEffect to avoid React 18 automatic batching
-  // in event handlers (which would batch isCompressing=true and =false together,
-  // causing the user to never see the loading UI)
-  const [compressionTask, setCompressionTask] = useState(null);
-
-  useEffect(() => {
-    filesRef.current = files;
-  });
-
-  // Cleanup object URLs on unmount
-  useEffect(() => {
-    return () => {
-      Object.values(filePreviews).forEach(url => {
-        if (url && url.startsWith('blob:')) URL.revokeObjectURL(url);
-      });
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (!compressionTask) return;
-
-    const { files: incomingFiles } = compressionTask;
-
-    const runCompression = async () => {
-      const currentFiles = filesRef.current;
-      const originalTotal = currentFiles.reduce((s, f) => s + f.size, 0);
-
-      // Show loading UI (triggers separate re-render because we're in useEffect)
-      setCompressionStatus({
-        isCompressing: true,
-        originalSize: originalTotal,
-        compressedSize: 0,
-        completed: 0,
-        total: incomingFiles.length
-      });
-
-      try {
-        const results = await compressImages(incomingFiles, (completed, total) => {
-          setCompressionStatus(prev => ({ ...prev, completed, total }));
-        });
-
-        // Track per-file compression states
-        const newCompressionStates = {};
-        results.forEach((res, idx) => {
-          const raw = incomingFiles[idx];
-          const key = `${raw.name}-${raw.size}`;
-          newCompressionStates[key] = {
-            skipped: res.skipped,
-            originalSize: res.originalSize,
-            compressedSize: res.compressedSize
-          };
-        });
-        setFileCompressionStates(prev => ({ ...prev, ...newCompressionStates }));
-
-        // Replace raw files with compressed versions
-        setFiles(prev => {
-          const newFiles = [...prev];
-          incomingFiles.forEach((raw, idx) => {
-            const foundIdx = newFiles.findIndex(f => f.name === raw.name && f.size === raw.size);
-            if (foundIdx >= 0 && results[idx] && !results[idx].skipped) {
-              // Revoke old preview URL for this file before replacing
-              const oldKey = `${raw.name}-${raw.size}`;
-              const oldUrl = filePreviews[oldKey];
-              if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl);
-              newFiles[foundIdx] = results[idx].file;
-            }
-          });
-          return newFiles;
-        });
-
-        // Calculate final compressed total
-        const compressedFilesSize = results.reduce((s, r) => s + r.file.size, 0);
-        const skippedFilesSize = results.filter(r => r.skipped).reduce((s, r) => s + r.originalSize, 0);
-        const currentFilesSize = currentFiles.reduce((s, f) => s + f.size, 0);
-        const incomingFilesSize = incomingFiles.reduce((s, f) => s + f.size, 0);
-        const compressedTotal = currentFilesSize - incomingFilesSize + compressedFilesSize + skippedFilesSize;
-
-        // Show savings badge
-        setCompressionStatus({
-          isCompressing: false,
-          originalSize: originalTotal,
-          compressedSize: compressedTotal,
-          completed: results.length,
-          total: incomingFiles.length
-        });
-      } catch (err) {
-        console.error('Compression error:', err);
-        const currentFilesSize = currentFiles.reduce((s, f) => s + f.size, 0);
-        setCompressionStatus({
-          isCompressing: false,
-          originalSize: currentFilesSize,
-          compressedSize: currentFilesSize,
-          completed: incomingFiles.length,
-          total: incomingFiles.length
-        });
-      }
-    };
-
-    runCompression();
-  }, [compressionTask, filePreviews]);
-
-  // File Upload Handlers
   const processIncomingFiles = (incomingFiles) => {
-    const totalAllowed = 5 - files.length;
-    if (totalAllowed <= 0) {
+    if (files.length + incomingFiles.length > 5) {
       setError('Maksimal 5 gambar. Hapus file yang ada untuk menambah baru.');
       return;
     }
-    const filesToAdd = incomingFiles.slice(0, totalAllowed);
 
-    // Create preview URLs for each new file
-    const newPreviews = {};
-    filesToAdd.forEach(file => {
-      const key = `${file.name}-${file.size}`;
-      newPreviews[key] = URL.createObjectURL(file);
-    });
-    setFilePreviews(prev => ({ ...prev, ...newPreviews }));
-
-    // Save raw files to state immediately (visible in UI right away)
+    const filesToAdd = incomingFiles.slice(0, 5 - files.length);
     setFiles(prev => [...prev, ...filesToAdd]);
     setError(null);
-
-    // Trigger compression via useEffect (separate from event handler batching)
-    setCompressionTask({ files: filesToAdd, id: Date.now() });
   };
 
   const handleFileChange = (e) => {
     if (e.target.files) {
-      const selectedFiles = Array.from(e.target.files);
-      processIncomingFiles(selectedFiles);
+      processIncomingFiles(Array.from(e.target.files));
       e.target.value = '';
     }
   };
 
-  const handleDragOver = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOver(true);
-  };
-
-  const handleDragLeave = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOver(false);
-  };
-
+  const handleDragOver = (e) => { e.preventDefault(); setDragOver(true); };
+  const handleDragLeave = (e) => { e.preventDefault(); setDragOver(false); };
   const handleDrop = (e) => {
     e.preventDefault();
-    e.stopPropagation();
     setDragOver(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const droppedFiles = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
-      if (droppedFiles.length > 0) {
-        processIncomingFiles(droppedFiles);
-      } else {
-        setError('Hanya file gambar yang diizinkan. Silakan drop file gambar.');
-      }
-    }
+    const dropped = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+    if (dropped.length > 0) processIncomingFiles(dropped);
+    else setError('Hanya file gambar yang diizinkan.');
   };
 
-  const handleRemoveFile = (indexToRemove) => {
-    const fileToRemove = files[indexToRemove];
-    if (fileToRemove) {
-      const key = `${fileToRemove.name}-${fileToRemove.size}`;
-      const url = filePreviews[key];
-      if (url && url.startsWith('blob:')) URL.revokeObjectURL(url);
-      setFilePreviews(prev => {
-        const next = { ...prev };
-        delete next[key];
-        return next;
-      });
-      setFileCompressionStates(prev => {
-        const next = { ...prev };
-        delete next[key];
-        return next;
-      });
-    }
-    setFiles(files.filter((_, idx) => idx !== indexToRemove));
-  };
-
-  useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setDriverLat(position.coords.latitude.toFixed(6));
-          setDriverLng(position.coords.longitude.toFixed(6));
-        },
-        () => {
-          console.warn('Geolocation access denied/failed, using default coordinates (Jakarta Barat).');
-          setError('Akses lokasi ditolak. Menggunakan koordinat default Jakarta Barat. Aktifkan GPS untuk rute lebih akurat.');
-        }
-      );
-    }
-  }, []);
-
-  const toggleStepCompleted = (index) => {
-    setCompletedSteps(prev => ({
-      ...prev,
-      [index]: !prev[index]
-    }));
+  const handleRemoveFile = (idx) => {
+    setFiles(prev => prev.filter((_, i) => i !== idx));
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (files.length === 0) {
-      setError('Silakan pilih minimal 1 file gambar screenshot terlebih dahulu!');
+      setError('Pilih minimal 1 file gambar screenshot terlebih dahulu!');
       return;
     }
 
     setLoading(true);
     setError(null);
-    setWaypoints([]);
-    setRouteDetails(null);
-    setNavigationLink(null);
-    setCompletedSteps({});
+    setResults(null);
 
     const formData = new FormData();
-    files.forEach((file) => {
-      formData.append('screenshots', file);
-    });
-    formData.append('driver_lat', driverLat);
-    formData.append('driver_lng', driverLng);
+    files.forEach((file) => formData.append('screenshots', file));
 
     try {
       const response = await fetch('/api/extract-address', {
         method: 'POST',
         body: formData
       });
-
       const result = await response.json();
-
       if (response.ok && result.success) {
-        setRoutesData(result.routes || null);
-        if (result.failed_orders && result.failed_orders.length > 0) {
-          const names = result.failed_orders.map(o => o.name).join(', ');
-          setError(`Beberapa alamat tidak dapat diproses: ${names}. Periksa kembali alamat pada screenshot.`);
+        setResults(result.data);
+        if (result.failed_items && result.failed_items.length > 0) {
+          setError(`${result.failed_items.length} alamat gagal diproses.`);
         }
       } else {
         throw new Error(result.error || result.details || 'Terjadi kesalahan pada server.');
       }
     } catch (err) {
-      console.error('Error processing route:', err);
-      setError(`Gagal memproses rute: ${err.message}`);
+      console.error('Error:', err);
+      setError(`Gagal memproses: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  // Convert duration string "Xs", number, or Routes API V2 object to descriptive format
-  const formatDuration = (durationVal) => {
-    if (!durationVal) return null;
-    let seconds;
-    if (typeof durationVal === 'string') {
-      seconds = parseInt(durationVal.replace('s', ''), 10);
-    } else if (typeof durationVal === 'object' && durationVal.seconds !== undefined) {
-      seconds = parseInt(durationVal.seconds, 10);
-    } else {
-      seconds = durationVal;
+  const getAccuracyBadge = (geocoding) => {
+    if (!geocoding) return { label: 'Tidak diketahui', color: 'gray', icon: AlertCircle };
+    if (geocoding.is_accurate) {
+      return { label: 'Akurat', color: 'green', icon: CheckCircle };
     }
-    
-    const totalMinutes = Math.round(seconds / 60);
-    if (totalMinutes < 60) {
-      return `${totalMinutes} menit`;
+    if (geocoding.warning) {
+      return { label: 'Kurang Akurat', color: 'yellow', icon: AlertTriangle };
     }
-    const hours = Math.floor(totalMinutes / 60);
-    const mins = totalMinutes % 60;
-    return `${hours} jam ${mins} menit`;
+    return { label: 'Tidak Akurat', color: 'red', icon: XCircle };
   };
 
-  // Convert meters to km
-  const formatDistance = (meters) => {
-    if (!meters) return null;
-    return `${(meters / 1000).toFixed(1)} km`;
-  };
-
-  const formatFileSize = (bytes) => {
-    if (!bytes) return '0 KB';
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-  };
-
-  const currentRouteAPI = selectedRouteAPI;
-  const currentRoute = routesData ? routesData[currentRouteAPI] : null;
-  const currentWaypoints = currentRoute ? currentRoute.optimized_waypoints : waypoints;
-  const currentRouteDetails = currentRoute ? currentRoute.route_details : routeDetails;
-  const currentNavigationLink = currentRoute ? currentRoute.navigation_link : navigationLink;
+  const formatCoord = (val) => val ? val.toFixed(6) : '-';
 
   return (
     <div className="app-container">
-      {/* LEFT SIDEBAR: Controls & Rute List */}
-      <div className="sidebar">
-        
+      <div className="main-card">
         {/* Header */}
-        <div className="glass-panel" style={{ padding: '16px' }}>
-          <h1 className="app-title">Ojol-Cuanbot Router</h1>
-          <p className="app-subtitle">Kurir Multi-Drop Smart Route Optimizer (AI OCR)</p>
+        <div className="header">
+          <h1 className="title">
+            <MapPin size={24} />
+            Koordinat Akurat
+          </h1>
+          <p className="subtitle">Ekstrak alamat dari screenshot & tentukan titik koordinat presisi</p>
         </div>
 
-        {/* Controls: Form Upload & Driver Simulator */}
-        <div className="glass-panel">
-              <h2 className="section-title"><Upload size={18} /> Unggah Screenshot Struk</h2>
-              
-              <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <label
-                  className={`upload-zone ${dragOver ? 'dragover' : ''}`}
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onDrop={handleDrop}
-                >
-                  <input
-                    type="file"
-                    multiple
-                    accept="image/*"
-                    onChange={handleFileChange}
-                    className="checkbox-input"
-                  />
-                  <div className="upload-icon-wrapper">
-                    {dragOver ? <Image size={22} color="#00f2fe" /> : <Upload size={22} />}
-                  </div>
-                  <span className="upload-text">
-                    {dragOver ? 'Lepaskan file di sini' : 'Pilih atau Drag File di Sini'}
-                  </span>
-                  <span className="upload-subtext">Maksimal 5 file screenshot detail pesanan</span>
-                </label>
-
-                {compressionStatus.isCompressing && (
-                  <div style={{
-                    padding: '10px 12px',
-                    background: 'rgba(59, 130, 246, 0.1)',
-                    border: '1px solid rgba(59, 130, 246, 0.2)',
-                    borderRadius: '8px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px',
-                    fontSize: '11px',
-                    color: '#93c5fd'
-                  }}>
-                    <div className="loader-spinner" style={{ width: '16px', height: '16px', borderWidth: '3px', borderColor: 'rgba(59,130,246,0.2)', borderTopColor: '#3b82f6' }}></div>
-                    <span>Mengompresi gambar... ({compressionStatus.completed}/{compressionStatus.total})</span>
-                  </div>
-                )}
-
-                {!compressionStatus.isCompressing && compressionStatus.compressedSize > 0 && compressionStatus.originalSize > compressionStatus.compressedSize && (
-                  <div style={{
-                    padding: '10px 12px',
-                    background: 'rgba(34, 197, 94, 0.08)',
-                    border: '1px solid rgba(34, 197, 94, 0.15)',
-                    borderRadius: '8px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px'
-                  }}>
-                    <Zap size={14} color="#22c55e" />
-                    <span style={{ fontSize: '11px', color: '#86efac', lineHeight: '1.4' }}>
-                      <strong>Hemat kuota {Math.round((1 - compressionStatus.compressedSize / compressionStatus.originalSize) * 100)}%</strong><br/>
-                      <span style={{ opacity: 0.7 }}>
-                        {formatFileSize(compressionStatus.originalSize)} → {formatFileSize(compressionStatus.compressedSize)}
-                      </span>
-                    </span>
-                  </div>
-                )}
-
-                {/* List of chosen files with thumbnails */}
-                {files.length > 0 && (
-                  <div className="file-previews">
-                    {files.map((file, idx) => {
-                      const key = `${file.name}-${file.size}`;
-                      const previewUrl = filePreviews[key];
-                      const compState = fileCompressionStates[key];
-
-                      return (
-                        <div key={idx} className="preview-card">
-                          <div className="preview-thumbnail-wrapper">
-                            {previewUrl ? (
-                              <img src={previewUrl} alt={file.name} className="preview-thumbnail" />
-                            ) : (
-                              <div className="preview-thumbnail-placeholder">
-                                <FileImage size={20} />
-                              </div>
-                            )}
-                          </div>
-                          <div className="preview-info">
-                            <span className="preview-name" title={file.name}>
-                              {file.name}
-                            </span>
-                            <div className="preview-meta">
-                              <span className="preview-size">{formatFileSize(file.size)}</span>
-                              {compState && (
-                                <span className={`compression-badge ${compState.skipped ? 'skipped' : 'compressed'}`}>
-                                  {compState.skipped ? (
-                                    <><ArrowRight size={10} /> Dilewati</>
-                                  ) : (
-                                    <><Check size={10} /> Dikompresi</>
-                                  )}
-                                </span>
-                              )}
-                              {compState && !compState.skipped && (
-                                <span className="preview-size-delta">
-                                  {formatFileSize(compState.originalSize)} → {formatFileSize(compState.compressedSize)}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          <button type="button" onClick={() => handleRemoveFile(idx)} className="remove-file-btn" title="Hapus file">
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                <button 
-                  type="submit" 
-                  className="action-btn"
-                  disabled={loading || files.length === 0}
-                >
-                  {loading ? (
-                    <>
-                      <div className="loader-spinner"></div>
-                      <span>AI sedang memproses...</span>
-                    </>
-                  ) : (
-                    <>
-                      <TrendingUp size={16} />
-                      <span>Optimalkan Rute Pintar</span>
-                    </>
-                  )}
-                </button>
-              </form>
-            </div>
-
-            {/* Results: Optimized Waypoints Timeline */}
-            <div className="glass-panel scroll-panel">
-              <h2 className="section-title"><CheckCircle2 size={18} /> Rincian Urutan Kunjungan</h2>
-              
-              {error && (
-                <div className="preview-chip" style={{ background: 'rgba(239, 68, 68, 0.08)', borderColor: 'rgba(239, 68, 68, 0.2)', color: '#f87171', padding: '8px 12px', borderRadius: '8px', marginBottom: '12px', display: 'flex', width: '100%' }}>
-                  <AlertCircle size={16} style={{ flexShrink: 0 }} />
-                  <span style={{ fontSize: '11px', lineHeight: '1.4' }}>{error}</span>
-                </div>
-              )}
-
-              {loading && (
-                <div className="loading-container">
-                  <div className="loader-spinner" style={{ width: '32px', height: '32px', borderWidth: '4px' }}></div>
-                  <p>Membaca struk dengan AI Multimodal...</p>
-                  <small style={{ color: '#64748b', fontSize: '11px' }}>Mengekstrak alamat, geocoding koordinat, dan menyusun rute satu arah terbaik.</small>
-                </div>
-              )}
-
-              {/* RENDER THE COMPARATOR ACCURACY PANEL HERE IF ROUTES DATA IS AVAILABLE */}
-              {!loading && routesData && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.05)', borderRadius: '10px', padding: '12px' }}>
-                  <h3 className="section-title" style={{ fontSize: '13px', marginBottom: '8px', color: '#f1f5f9' }}><TrendingUp size={14} /> Komparasi Rute Visual</h3>
-                  
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {/* Geocoding */}
-                    <div 
-                      onClick={() => setSelectedRouteAPI('geocoding')}
-                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', padding: '8px 10px', borderRadius: '8px', background: selectedRouteAPI === 'geocoding' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(239, 68, 68, 0.04)', border: selectedRouteAPI === 'geocoding' ? '2px solid rgba(239, 68, 68, 0.6)' : '1px solid rgba(239, 68, 68, 0.1)', cursor: 'pointer', transition: 'all 0.2s ease' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <input 
-                          type="checkbox" 
-                          checked={visibilityFlags.geocoding}
-                          onChange={(e) => setVisibilityFlags(prev => ({ ...prev, geocoding: e.target.checked }))}
-                          onClick={(e) => e.stopPropagation()}
-                          style={{ accentColor: '#ef4444', cursor: 'pointer' }}
-                        />
-                        <span style={{ color: '#ef4444', fontWeight: 700 }}>🔴 Geocoding</span>
-                        {selectedRouteAPI === 'geocoding' && <span style={{ fontSize: '8px', background: 'rgba(239, 68, 68, 0.25)', color: '#ef4444', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>◀ AKTIF</span>}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <span>{formatDistance(routesData.geocoding?.route_details?.distanceMeters) || 'N/A'}</span>
-                        <span style={{ color: '#64748b' }}>|</span>
-                        <span>{formatDuration(routesData.geocoding?.route_details?.duration) || 'N/A'}</span>
-                      </div>
-                    </div>
-
-                    {/* Places */}
-                    <div 
-                      onClick={() => setSelectedRouteAPI('places')}
-                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', padding: '8px 10px', borderRadius: '8px', background: selectedRouteAPI === 'places' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(59, 130, 246, 0.04)', border: selectedRouteAPI === 'places' ? '2px solid rgba(59, 130, 246, 0.6)' : '1px solid rgba(59, 130, 246, 0.1)', cursor: 'pointer', transition: 'all 0.2s ease' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <input 
-                          type="checkbox" 
-                          checked={visibilityFlags.places}
-                          onChange={(e) => setVisibilityFlags(prev => ({ ...prev, places: e.target.checked }))}
-                          onClick={(e) => e.stopPropagation()}
-                          style={{ accentColor: '#3b82f6', cursor: 'pointer' }}
-                        />
-                        <span style={{ color: '#3b82f6', fontWeight: 700 }}>🔵 Places API</span>
-                        {selectedRouteAPI === 'places' && <span style={{ fontSize: '8px', background: 'rgba(59, 130, 246, 0.25)', color: '#3b82f6', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>◀ AKTIF</span>}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <span>{formatDistance(routesData.places?.route_details?.distanceMeters) || 'N/A'}</span>
-                        <span style={{ color: '#64748b' }}>|</span>
-                        <span>{formatDuration(routesData.places?.route_details?.duration) || 'N/A'}</span>
-                      </div>
-                    </div>
-
-                  </div>
-                  <div style={{ fontSize: '9px', color: '#94a3b8', marginTop: '8px', textAlign: 'center', lineHeight: '1.4' }}>
-                    🖱️ <strong>Klik baris</strong> untuk memilih rute aktif (Timeline & Navigasi). ☑️ <strong>Centang</strong> untuk tampil/sembunyikan rute di peta.
-                  </div>
-                </div>
-              )}
-
-              {!loading && currentWaypoints.length === 0 && (
-                <div className="empty-state">
-                  <HelpCircle size={40} className="empty-state-icon" />
-                  <p>Belum ada rute aktif.</p>
-                  <small>Unggah screenshot pesanan di atas untuk memulai pencarian rute pintar kurir.</small>
-                </div>
-              )}
-
-              {!loading && currentWaypoints.length > 0 && (
-                <>
-                  {/* Route Summary Banner (if details exist) */}
-                  {currentRouteDetails && (
-                    <div className="route-summary-banner">
-                      <div className="summary-stat">
-                        <span className="summary-label">Total Jarak ({currentRouteAPI.toUpperCase()})</span>
-                        <span className="summary-value">{formatDistance(currentRouteDetails.distanceMeters)}</span>
-                      </div>
-                      <div className="summary-stat" style={{ borderLeft: '1px solid rgba(255, 255, 255, 0.1)', paddingLeft: '16px' }}>
-                        <span className="summary-label">Waktu Tempuh</span>
-                        <span className="summary-value">{formatDuration(currentRouteDetails.duration)}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Waypoints Timeline List */}
-                  <div className="timeline-list">
-                    {currentWaypoints.map((wp, idx) => {
-                      const isCompleted = !!completedSteps[idx];
-                      let badgeClass = 'badge-driver';
-                      let badgeText = 'D';
-
-                      if (wp.type === 'pickup') {
-                        badgeClass = 'badge-pickup';
-                        badgeText = 'P';
-                      } else if (wp.type === 'delivery') {
-                        badgeClass = 'badge-delivery';
-                        badgeText = 'D';
-                      }
-
-                      return (
-                        <div key={idx} className={`timeline-item ${isCompleted ? 'completed' : ''}`}>
-                          <div className={`timeline-badge ${badgeClass}`}>
-                            {badgeText}
-                          </div>
-                          
-                          <div className="timeline-content">
-                            <div className="timeline-info">
-                              <div className="timeline-title-row">
-                                <span className={`timeline-type-pill ${wp.type === 'pickup' ? 'pill-pickup' : wp.type === 'delivery' ? 'pill-delivery' : 'pill-pickup'}`} style={{ display: wp.type === 'driver' ? 'none' : 'inline-block' }}>
-                                  {wp.type === 'pickup' ? 'Ambil' : 'Kirim'}
-                                </span>
-                                <span className="timeline-name">{wp.name}</span>
-                              </div>
-                              <span className="timeline-address">{wp.address || 'Posisi Awal Kurir'}</span>
-                            </div>
-
-                            <div className="timeline-actions">
-                              {/* Deep Link Navigation (disable for driver start location) */}
-                              {wp.type !== 'driver' && (
-                                <a
-                                  href={`https://www.google.com/maps/dir/?api=1&destination=${wp.coordinates.lat},${wp.coordinates.lng}${wp.place_id ? `&destination_place_id=${encodeURIComponent(wp.place_id)}` : ''}&travelmode=two-wheeler`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="nav-link-btn"
-                                  title="Navigasi ke lokasi ini"
-                                >
-                                  <Navigation size={14} />
-                                </a>
-                              )}
-
-                              {/* Complete Step Checkbox */}
-                              <label className="checkbox-wrapper">
-                                <input 
-                                  type="checkbox" 
-                                  checked={isCompleted} 
-                                  onChange={() => toggleStepCompleted(idx)}
-                                  className="checkbox-input"
-                                />
-                                <div className="custom-checkbox">
-                                  ✓
-                                </div>
-                              </label>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Master Navigation Link (Open whole route) */}
-                  {currentNavigationLink && (
-                    <a 
-                      href={currentNavigationLink} 
-                      target="_blank" 
-                      rel="noopener noreferrer" 
-                      className="action-btn"
-                      style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)', marginTop: '20px' }}
-                    >
-                      <Navigation size={16} />
-                      <span>Buka Navigasi Rute Utuh (Google Maps - {currentRouteAPI.toUpperCase()})</span>
-                    </a>
-                  )}
-                </>
-              )}
-        </div>
-
-      </div>
-
-      {/* RIGHT AREA: Fullscreen Interactive Map */}
-      <div className="map-container glass-panel" style={{ padding: 0 }}>
-        <MapComponent 
-          waypoints={currentWaypoints} 
-          encodedPolyline={currentRouteDetails?.polyline?.encodedPolyline} 
-          routesData={routesData}
-          visibilityFlags={visibilityFlags}
-        />
-        {currentNavigationLink && (
-          <a 
-            href={currentNavigationLink} 
-            target="_blank" 
-            rel="noopener noreferrer" 
-            className="map-navigation-fab"
+        {/* Upload Section */}
+        <div className="upload-section">
+          <label
+            className={`upload-zone ${dragOver ? 'dragover' : ''}`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
           >
-            <Navigation size={18} />
-            <span>Navigasi Google Maps ({currentRouteAPI.toUpperCase()})</span>
-          </a>
+            <input
+              type="file"
+              multiple
+              accept="image/*"
+              onChange={handleFileChange}
+              ref={fileInputRef}
+              className="hidden-input"
+            />
+            <Upload size={32} className="upload-icon" />
+            <span className="upload-text">
+              {dragOver ? 'Lepaskan file di sini' : 'Klik atau Drag File Gambar'}
+            </span>
+            <span className="upload-subtext">Maksimal 5 file screenshot pesanan</span>
+          </label>
+
+          {/* File List */}
+          {files.length > 0 && (
+            <div className="file-list">
+              {files.map((file, idx) => (
+                <div key={idx} className="file-chip">
+                  <FileImage size={16} />
+                  <span className="file-name" title={file.name}>{file.name}</span>
+                  <span className="file-size">({(file.size / 1024).toFixed(0)} KB)</span>
+                  <button type="button" onClick={() => handleRemoveFile(idx)} className="remove-btn">
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <button
+            type="button"
+            className="submit-btn"
+            onClick={handleSubmit}
+            disabled={loading || files.length === 0}
+          >
+            {loading ? (
+              <>
+                <div className="spinner"></div>
+                <span>AI sedang membaca alamat...</span>
+              </>
+            ) : (
+              <>
+                <Upload size={16} />
+                <span>Ekstrak Koordinat</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* Error */}
+        {error && (
+          <div className="error-box">
+            <AlertCircle size={18} />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {/* Results */}
+        {results && results.length > 0 && (
+          <div className="results-section">
+            <h2 className="results-title">Hasil Ekstraksi ({results.length} pesanan)</h2>
+
+            {results.map((order, idx) => {
+              const pickupBadge = getAccuracyBadge(order.pickup?.geocoding);
+              const deliveryBadge = getAccuracyBadge(order.delivery?.geocoding);
+              const PickupIcon = pickupBadge.icon;
+              const DeliveryIcon = deliveryBadge.icon;
+
+              return (
+                <div key={idx} className="order-card">
+                  <div className="order-header">
+                    <span className="order-number">Pesanan #{idx + 1}</span>
+                  </div>
+
+                  {/* Pickup */}
+                  <div className="address-block">
+                    <div className="address-type pickup">Pickup</div>
+                    <div className="address-name">{order.pickup?.seller_name || '?'}</div>
+                    <div className="address-text">{order.pickup?.address?.full_address || order.pickup?.address}</div>
+                    {order.pickup?.coordinates && (
+                      <div className="coord-row">
+                        <span className="coord-value">
+                          lat: {formatCoord(order.pickup.coordinates.lat)}, lng: {formatCoord(order.pickup.coordinates.lng)}
+                        </span>
+                        <span className={`accuracy-badge ${pickupBadge.color}`}>
+                          <PickupIcon size={14} />
+                          {pickupBadge.label}
+                        </span>
+                      </div>
+                    )}
+                    {order.pickup?.geocoding?.warning && (
+                      <div className="warning-text">{order.pickup.geocoding.warning}</div>
+                    )}
+                  </div>
+
+                  {/* Delivery */}
+                  <div className="address-block">
+                    <div className="address-type delivery">Delivery</div>
+                    <div className="address-name">{order.delivery?.customer_name || '?'}</div>
+                    <div className="address-text">{order.delivery?.address?.full_address || order.delivery?.address}</div>
+                    {order.delivery?.coordinates && (
+                      <div className="coord-row">
+                        <span className="coord-value">
+                          lat: {formatCoord(order.delivery.coordinates.lat)}, lng: {formatCoord(order.delivery.coordinates.lng)}
+                        </span>
+                        <span className={`accuracy-badge ${deliveryBadge.color}`}>
+                          <DeliveryIcon size={14} />
+                          {deliveryBadge.label}
+                        </span>
+                      </div>
+                    )}
+                    {order.delivery?.geocoding?.warning && (
+                      <div className="warning-text">{order.delivery.geocoding.warning}</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Empty State */}
+        {!loading && !results && !error && (
+          <div className="empty-state">
+            <MapPin size={48} className="empty-icon" />
+            <p>Upload screenshot pesanan untuk mulai ekstraksi koordinat.</p>
+          </div>
         )}
       </div>
-
     </div>
   );
 }

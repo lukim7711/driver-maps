@@ -1,0 +1,27 @@
+name = "driver-maps-api"
+main = "workers-src/index.js"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Workers AI binding untuk Gemma 4 Vision
+[ai]
+binding = "AI"
+
+# D1 database untuk cache alamat
+[[d1_databases]]
+binding = "DB"
+database_name = "driver-maps-cache"
+database_id = "9c469d68-6f64-4600-b7d5-13f0bc70271b"
+
+# KV namespace untuk rate limiting
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "9214975c6fb44dfc9ab0cea3da94a84c"
+
+[vars]
+ENVIRONMENT = "production"
+GEMINI_MODEL = "@cf/google/gemma-4-26b-a4b-it"
+MIN_ACCEPTABLE_LOCATION_TYPE = "3"
+
+# Secret: GOOGLE_MAPS_API_KEY (set via wrangler secret atau GitHub Actions)
+# wrangler secret put GOOGLE_MAPS_API_KEY

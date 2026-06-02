@@ -57,12 +57,8 @@ async function getCachedAddress(normalizedQuery, apiType) {
             console.warn('Cache increment error:', err.message);
         }
 
-        return {
-            lat: cached.lat,
-            lng: cached.lng,
-            formatted_address: cached.formatted_address,
-            place_id: cached.place_id || null
-        };
+        // Kembalikan seluruh metadata yang tersimpan, bukan hanya koordinat
+        return cached;
     } catch (err) {
         console.warn('Cache read error:', err.message);
         return null;
@@ -76,15 +72,23 @@ async function saveAddressToCache(normalizedQuery, apiType, result) {
         const docId = getCacheKey(normalizedQuery);
         const now = Firestore.FieldValue.serverTimestamp();
 
+        // Simpan seluruh result object (termasuk metadata confidence)
+        const cachePayload = {
+            lat: result.lat,
+            lng: result.lng,
+            formatted_address: result.formatted_address || null,
+            place_id: result.place_id || null,
+            source: result.source || null,
+            confidence: result.confidence || null,
+            is_accurate: result.is_accurate || false,
+            clean_query: result.clean_query || null,
+            warning: result.warning || null,
+            cached_at: now,
+        };
+
         await db.collection(CACHE_COLLECTION).doc(docId).set({
             normalized_query: normalizedQuery,
-            [`${apiType}`]: {
-                lat: result.lat,
-                lng: result.lng,
-                formatted_address: result.formatted_address || null,
-                place_id: result.place_id || null,
-                cached_at: now
-            },
+            [`${apiType}`]: cachePayload,
             last_used: now,
             first_seen: Firestore.FieldValue.serverTimestamp()
         }, { merge: true });

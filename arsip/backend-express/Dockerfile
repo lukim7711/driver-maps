@@ -10,6 +10,9 @@ COPY package*.json ./
 # Install hanya dependensi produksi untuk efisiensi ukuran container
 RUN npm ci --only=production
 
+# Invalidate cache agar file source selalu ter-copy fresh
+RUN echo "cache-bust-v2-$(date +%s)"
+
 # Salin seluruh berkas kode sumber backend
 COPY . .
 

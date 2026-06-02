@@ -31,5 +31,9 @@ Thumbs.db
 # Other
 backend.tar.gz
 
+# Wrangler local cache (jangan commit)
+.wrangler/
+.wrangler/**/*
+
 # OpenCode personal config (contains API keys)
 opencode.json
