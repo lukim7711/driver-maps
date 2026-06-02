@@ -31,7 +31,14 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
       - name: Set Google Maps API Key Secret
-        run: wrangler secret put GOOGLE_MAPS_API_KEY --value "${{ secrets.GOOGLE_MAPS_API_KEY }}" || echo "Secret already exists, skipping"
+        run: |
+          if [ -n "${{ secrets.GOOGLE_MAPS_API_KEY }}" ]; then
+            echo "${{ secrets.GOOGLE_MAPS_API_KEY }}" | wrangler secret put GOOGLE_MAPS_API_KEY
+            echo "Secret set successfully"
+          else
+            echo "GOOGLE_MAPS_API_KEY secret not set in GitHub, skipping"
+            exit 1
+          fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
