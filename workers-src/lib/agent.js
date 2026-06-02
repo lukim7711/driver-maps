@@ -72,35 +72,70 @@ PETUNJUK PENTING:
     try {
         console.log(`Calling Workers AI with model: ${modelName}, images: ${imageUrls.length}`);
 
-        // Gemma 4 di Workers AI menggunakan format messages (seperti OpenAI)
-        const requestBody = {
-            messages: [
-                {
-                    role: 'user',
-                    content: [
-                        { type: 'text', text: prompt },
-                        ...imageUrls.map(url => ({
-                            type: 'image_url',
-                            image_url: { url }
-                        }))
-                    ]
-                }
-            ]
-        };
+        // Gemma 4 vision: coba format prompt + image (seperti Llama 3.2 Vision)
+        // Karena docs tidak menampilkan contoh vision call, kita coba beberapa format
+        let response;
 
-        console.log('Request body structure prepared');
+        // Format 1: messages + content array dengan image_url (OpenAI-style)
+        try {
+            console.log('Trying format: messages with image_url content');
+            response = await env.AI.run(modelName, {
+                messages: [
+                    {
+                        role: 'user',
+                        content: [
+                            { type: 'text', text: prompt },
+                            ...imageUrls.map(url => ({
+                                type: 'image_url',
+                                image_url: { url }
+                            }))
+                        ]
+                    }
+                ]
+            });
+            console.log('Format 1 response keys:', Object.keys(response));
+        } catch (e1) {
+            console.warn('Format 1 failed:', e1.message);
 
-        const response = await env.AI.run(modelName, requestBody);
+            // Format 2: prompt + image (Llama 3.2 Vision style)
+            try {
+                console.log('Trying format: prompt + image');
+                response = await env.AI.run(modelName, {
+                    prompt: prompt,
+                    image: imageUrls
+                });
+                console.log('Format 2 response keys:', Object.keys(response));
+            } catch (e2) {
+                console.error('Format 2 also failed:', e2.message);
+                throw e2;
+            }
+        }
 
-        console.log('Workers AI response keys:', Object.keys(response));
-        console.log('Response preview:', JSON.stringify(response).substring(0, 300));
+        console.log('Workers AI full response preview:', JSON.stringify(response).substring(0, 500));
 
         // Workers AI response format: { response: "string" } untuk text generation
-        // Untuk vision models, response shape mungkin sama atau berbeda
-        const aiReply = response.response || response.text || response.description || response.content;
+        // Untuk vision models, response shape mungkin berbeda
+        let aiReply = response.response;
+
+        // Jika response.response tidak ada, cek field lain
+        if (!aiReply) {
+            // Format OpenAI-style: { choices: [{ message: { content: "..." } }] }
+            if (response.choices && Array.isArray(response.choices) && response.choices[0]) {
+                const choice = response.choices[0];
+                if (choice.message && choice.message.content) {
+                    aiReply = choice.message.content;
+                } else if (choice.text) {
+                    aiReply = choice.text;
+                }
+            }
+            // Fallback ke field umum
+            if (!aiReply) {
+                aiReply = response.text || response.description || response.content;
+            }
+        }
 
         if (!aiReply) {
-            console.warn('Workers AI response missing text. Full response:', JSON.stringify(response).substring(0, 500));
+            console.warn('Workers AI response missing text. Full response:', JSON.stringify(response).substring(0, 1000));
             return [];
         }
 
