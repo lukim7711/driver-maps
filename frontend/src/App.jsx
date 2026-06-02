@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
 import { Upload, FileImage, Trash2, AlertCircle, MapPin, CheckCircle, AlertTriangle, XCircle } from 'lucide-react';
+import imageCompression from 'browser-image-compression';
 import './App.css';
 
 export default function App() {
@@ -12,14 +13,24 @@ export default function App() {
   const fileInputRef = useRef(null);
 
   const processIncomingFiles = (incomingFiles) => {
-    if (files.length + incomingFiles.length > 5) {
+    // Validasi ukuran max 15MB untuk file asli agar browser tidak lambat
+    const validFiles = incomingFiles.filter(f => f.size <= 15 * 1024 * 1024);
+    if (validFiles.length < incomingFiles.length) {
+      setError('Beberapa file diabaikan karena ukurannya melebihi 15MB.');
+    }
+
+    if (files.length + validFiles.length > 5) {
       setError('Maksimal 5 gambar. Hapus file yang ada untuk menambah baru.');
       return;
     }
 
-    const filesToAdd = incomingFiles.slice(0, 5 - files.length);
+    const filesToAdd = validFiles.slice(0, 5 - files.length);
     setFiles(prev => [...prev, ...filesToAdd]);
-    setError(null);
+    
+    // Clear error only if all files were valid
+    if (validFiles.length === incomingFiles.length) {
+      setError(null);
+    }
   };
 
   const handleFileChange = (e) => {
@@ -55,7 +66,24 @@ export default function App() {
     setResults(null);
 
     const formData = new FormData();
-    files.forEach((file) => formData.append('screenshots', file));
+    
+    try {
+      // Kompresi gambar sebelum dikirim
+      for (const file of files) {
+        const options = {
+          maxSizeMB: 2,          // Kompres maksimal menjadi 2MB per gambar
+          maxWidthOrHeight: 1920, // Limit dimensi agar OCR masih bisa membaca dengan jelas
+          useWebWorker: true,
+        };
+        const compressedFile = await imageCompression(file, options);
+        formData.append('screenshots', compressedFile, file.name);
+      }
+    } catch (err) {
+      console.error('Compression error:', err);
+      setError('Gagal mengkompresi gambar. Silakan coba gambar lain.');
+      setLoading(false);
+      return;
+    }
 
     try {
       const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://driver-maps-api.cfkim.workers.dev';

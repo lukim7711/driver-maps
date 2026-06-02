@@ -51,10 +51,17 @@ export async function extractAddress(request, env, ctx) {
 
     // Convert files to base64 for Workers AI
     const filesToProcess = [];
+    const MAX_FILE_SIZE = 5 * 1024 * 1024; // Maksimal 5MB per file
+
     for (const file of files) {
         if (!file.type.startsWith('image/')) {
             return jsonResponse({ error: `File bukan gambar: ${file.name}` }, 400);
         }
+        
+        if (file.size > MAX_FILE_SIZE) {
+            return jsonResponse({ error: `Ukuran file terlalu besar (Maksimal 5MB): ${file.name}` }, 400);
+        }
+
         const buffer = await file.arrayBuffer();
         const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
         filesToProcess.push({
