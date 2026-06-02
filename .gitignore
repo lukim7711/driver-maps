@@ -37,3 +37,17 @@ backend.tar.gz
 
 # OpenCode personal config (contains API keys)
 opencode.json
+.opencode/agents/
+.opencode/.gitignore
+
+# Arsip file lama (tidak perlu di-push)
+arsip/
+
+# Test images (tidak perlu di-push)
+gambar/
+
+# AGENTS.md pribadi (tidak perlu di-push)
+AGENTS.md
+
+# OpenCode config example (tidak perlu di-push)
+global-opencode-config-example.json

@@ -7,6 +7,7 @@ on:
 
 env:
   NODE_VERSION: '22'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   deploy-workers:
@@ -22,7 +23,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Install Wrangler
-        run: npm install -g wrangler
+        run: npm install -g wrangler@latest
 
       - name: Apply D1 Schema
         run: wrangler d1 execute driver-maps-cache --file=./schema.sql --remote
@@ -63,4 +64,5 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy frontend/dist --project-name=driver-maps
+          workingDirectory: frontend
+          command: pages deploy dist --project-name=driver-maps --commit-dirty=true
