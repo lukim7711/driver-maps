@@ -61,13 +61,12 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Install Dependencies & Build Frontend
+        env:
+          VITE_API_BASE_URL: https://driver-maps-api.cfkim.workers.dev
         run: |
           cd frontend
           npm install
           npm run build
-          # Copy Pages Functions to dist
-          mkdir -p dist/functions
-          cp -r ../functions/* dist/functions/
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3

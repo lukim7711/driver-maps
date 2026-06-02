@@ -58,7 +58,8 @@ export default function App() {
     files.forEach((file) => formData.append('screenshots', file));
 
     try {
-      const response = await fetch('/api/extract-address', {
+      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://driver-maps-api.cfkim.workers.dev';
+      const response = await fetch(`${API_BASE}/api/extract-address`, {
         method: 'POST',
         body: formData
       });
