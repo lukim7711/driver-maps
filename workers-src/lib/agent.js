@@ -70,9 +70,10 @@ PETUNJUK PENTING:
 10. Jika gambar tidak berisi alamat, kembalikan null untuk pickup dan delivery.`;
 
     try {
-        // Workers AI vision models: gunakan parameter `image` (bukan messages content array)
-        // Untuk multiple images, kirim sebagai array
-        const response = await env.AI.run(modelName, {
+        console.log(`Calling Workers AI with model: ${modelName}, images: ${imageUrls.length}`);
+
+        // Gemma 4 di Workers AI menggunakan format messages (seperti OpenAI)
+        const requestBody = {
             messages: [
                 {
                     role: 'user',
@@ -85,13 +86,18 @@ PETUNJUK PENTING:
                     ]
                 }
             ]
-        });
+        };
+
+        console.log('Request body structure prepared');
+
+        const response = await env.AI.run(modelName, requestBody);
 
         console.log('Workers AI response keys:', Object.keys(response));
+        console.log('Response preview:', JSON.stringify(response).substring(0, 300));
 
-        // Workers AI response format: { response: "string" } untuk text
+        // Workers AI response format: { response: "string" } untuk text generation
         // Untuk vision models, response shape mungkin sama atau berbeda
-        const aiReply = response.response;
+        const aiReply = response.response || response.text || response.description || response.content;
 
         if (!aiReply) {
             console.warn('Workers AI response missing text. Full response:', JSON.stringify(response).substring(0, 500));
@@ -112,6 +118,7 @@ PETUNJUK PENTING:
         }
     } catch (apiError) {
         console.error('Workers AI API error:', apiError.message);
+        console.error('Full error:', JSON.stringify(apiError));
         throw apiError;
     }
 }
