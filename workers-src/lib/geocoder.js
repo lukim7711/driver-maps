@@ -40,8 +40,15 @@ async function geocodeViaGeocodingAPI(query, apiKey) {
     url.searchParams.set('region', 'id');
     url.searchParams.set('components', 'country:ID');
 
+    console.log(`Geocoding API URL (without key): ${url.toString().replace(apiKey, 'API_KEY_REDACTED')}`);
+    console.log(`API key length: ${apiKey ? apiKey.length : 0}`);
+    console.log(`API key starts with: ${apiKey ? apiKey.substring(0, 10) : 'EMPTY'}`);
+
     const response = await fetchWithRetry(url.toString(), {});
     const data = await response.json();
+
+    console.log(`Geocoding API response status: ${data.status}`);
+    console.log(`Geocoding API response error_message: ${data.error_message || 'none'}`);
 
     if (data.status !== 'OK' || !data.results || data.results.length === 0) {
         console.warn(`Geocoding API failed: ${data.status} for query: ${query.substring(0, 60)}...`);
